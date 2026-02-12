@@ -1,0 +1,306 @@
+package com.goodcamera.app.ui.screens
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Compare
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.goodcamera.app.processing.ImageProcessor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/**
+ * 撮影後レビュー画面
+ * 後処理の適用・比較・保存ができる
+ */
+@Composable
+fun ReviewScreen(
+    imagePath: String,
+    onBack: () -> Unit,
+    onSave: (Bitmap) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+
+    // 元画像とprocessed画像
+    var originalBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var processedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var isProcessing by remember { mutableStateOf(false) }
+    var showOriginal by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+
+    // 処理設定
+    var denoiseEnabled by remember { mutableStateOf(true) }
+    var denoiseStrength by remember { mutableStateOf(ImageProcessor.DenoiseStrength.MEDIUM) }
+    var sharpenEnabled by remember { mutableStateOf(true) }
+    var sharpenAmount by remember { mutableFloatStateOf(1.2f) }
+    var autoLevelsEnabled by remember { mutableStateOf(true) }
+
+    // 画像をロード
+    LaunchedEffect(imagePath) {
+        withContext(Dispatchers.IO) {
+            val bitmap = if (imagePath.startsWith("content://")) {
+                val uri = Uri.parse(imagePath)
+                context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            } else {
+                BitmapFactory.decodeFile(imagePath)
+            }
+            originalBitmap = bitmap
+        }
+    }
+
+    // 後処理を適用
+    LaunchedEffect(originalBitmap, denoiseEnabled, denoiseStrength, sharpenEnabled, sharpenAmount, autoLevelsEnabled) {
+        val original = originalBitmap ?: return@LaunchedEffect
+        isProcessing = true
+        withContext(Dispatchers.Default) {
+            val config = ImageProcessor.ProcessingConfig(
+                denoiseEnabled = denoiseEnabled,
+                denoiseStrength = denoiseStrength,
+                sharpenEnabled = sharpenEnabled,
+                sharpenAmount = sharpenAmount,
+                autoLevelsEnabled = autoLevelsEnabled,
+            )
+            processedBitmap = ImageProcessor.process(original, config)
+        }
+        isProcessing = false
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
+        // 画像表示
+        val displayBitmap = if (showOriginal) originalBitmap else processedBitmap ?: originalBitmap
+        displayBitmap?.let { bitmap ->
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "撮影画像",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // 処理中インジケータ
+        if (isProcessing) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        // 上部バー
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Filled.ArrowBack, "戻る", tint = Color.White)
+            }
+
+            Text(
+                text = if (showOriginal) "元画像" else "処理済み",
+                color = Color.White,
+                fontSize = 14.sp,
+            )
+
+            IconButton(onClick = {
+                processedBitmap?.let { onSave(it) }
+            }) {
+                Icon(Icons.Filled.Check, "保存", tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+
+        // 下部コントロール
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // 設定パネル
+            if (showSettings) {
+                ProcessingSettingsPanel(
+                    denoiseEnabled = denoiseEnabled,
+                    denoiseStrength = denoiseStrength,
+                    sharpenEnabled = sharpenEnabled,
+                    sharpenAmount = sharpenAmount,
+                    autoLevelsEnabled = autoLevelsEnabled,
+                    onDenoiseEnabledChanged = { denoiseEnabled = it },
+                    onDenoiseStrengthChanged = { denoiseStrength = it },
+                    onSharpenEnabledChanged = { sharpenEnabled = it },
+                    onSharpenAmountChanged = { sharpenAmount = it },
+                    onAutoLevelsEnabledChanged = { autoLevelsEnabled = it },
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // 比較ボタン（押している間だけ元画像表示）
+                FilledTonalButton(
+                    onClick = { showOriginal = !showOriginal },
+                ) {
+                    Icon(Icons.Filled.Compare, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (showOriginal) "処理後" else "比較")
+                }
+
+                // 設定ボタン
+                FilledTonalButton(
+                    onClick = { showSettings = !showSettings },
+                ) {
+                    Icon(Icons.Filled.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("調整")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProcessingSettingsPanel(
+    denoiseEnabled: Boolean,
+    denoiseStrength: ImageProcessor.DenoiseStrength,
+    sharpenEnabled: Boolean,
+    sharpenAmount: Float,
+    autoLevelsEnabled: Boolean,
+    onDenoiseEnabledChanged: (Boolean) -> Unit,
+    onDenoiseStrengthChanged: (ImageProcessor.DenoiseStrength) -> Unit,
+    onSharpenEnabledChanged: (Boolean) -> Unit,
+    onSharpenAmountChanged: (Float) -> Unit,
+    onAutoLevelsEnabledChanged: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xDD1E1E1E)),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("後処理設定", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ノイズリダクション
+            SettingRow(
+                label = "ノイズ除去",
+                enabled = denoiseEnabled,
+                onEnabledChanged = onDenoiseEnabledChanged,
+            )
+            if (denoiseEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ImageProcessor.DenoiseStrength.entries.forEach { strength ->
+                        FilterChip(
+                            selected = denoiseStrength == strength,
+                            onClick = { onDenoiseStrengthChanged(strength) },
+                            label = {
+                                Text(
+                                    when (strength) {
+                                        ImageProcessor.DenoiseStrength.LIGHT -> "弱"
+                                        ImageProcessor.DenoiseStrength.MEDIUM -> "中"
+                                        ImageProcessor.DenoiseStrength.STRONG -> "強"
+                                    },
+                                    fontSize = 12.sp,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // シャープニング
+            SettingRow(
+                label = "シャープニング",
+                enabled = sharpenEnabled,
+                onEnabledChanged = onSharpenEnabledChanged,
+            )
+            if (sharpenEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("弱", color = Color.Gray, fontSize = 11.sp)
+                    Slider(
+                        value = sharpenAmount,
+                        onValueChange = onSharpenAmountChanged,
+                        valueRange = 0.3f..2.5f,
+                        modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                    Text("強", color = Color.Gray, fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 自動レベル補正
+            SettingRow(
+                label = "自動コントラスト",
+                enabled = autoLevelsEnabled,
+                onEnabledChanged = onAutoLevelsEnabledChanged,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingRow(
+    label: String,
+    enabled: Boolean,
+    onEnabledChanged: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = Color.White, fontSize = 14.sp)
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChanged,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.primary,
+            ),
+        )
+    }
+}

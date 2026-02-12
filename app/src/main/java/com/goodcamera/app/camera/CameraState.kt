@@ -54,4 +54,6 @@ data class CameraUiState(
     val usingFrontCamera: Boolean = false,
     val hdrFrameCount: Int = 3,
     val nightFrameCount: Int = 8,
+    val showReviewScreen: Boolean = false,
+    val reviewImagePath: String? = null,
 )

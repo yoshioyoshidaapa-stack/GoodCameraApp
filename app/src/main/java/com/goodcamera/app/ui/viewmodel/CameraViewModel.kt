@@ -1,5 +1,6 @@
 package com.goodcamera.app.ui.viewmodel
 
+import android.graphics.Bitmap
 import android.view.Surface
 import androidx.lifecycle.ViewModel
 import com.goodcamera.app.camera.*
@@ -27,6 +28,8 @@ class CameraViewModel : ViewModel() {
             _uiState.update { it.copy(
                 isCaptureInProgress = false,
                 lastCapturedPath = path,
+                showReviewScreen = true,
+                reviewImagePath = path,
             ) }
         }
 
@@ -120,6 +123,19 @@ class CameraViewModel : ViewModel() {
 
     fun clearLastCapture() {
         _uiState.update { it.copy(lastCapturedPath = null) }
+    }
+
+    fun openReviewScreen(path: String) {
+        _uiState.update { it.copy(showReviewScreen = true, reviewImagePath = path) }
+    }
+
+    fun closeReviewScreen() {
+        _uiState.update { it.copy(showReviewScreen = false, reviewImagePath = null) }
+    }
+
+    fun saveProcessedImage(bitmap: Bitmap) {
+        cameraController?.saveBitmapToMediaStore(bitmap)
+        _uiState.update { it.copy(showReviewScreen = false, reviewImagePath = null) }
     }
 
     private fun applySettings() {

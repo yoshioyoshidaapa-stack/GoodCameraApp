@@ -18,6 +18,8 @@ import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import android.view.Surface
+import com.goodcamera.app.processing.ImageProcessor
+import com.goodcamera.app.processing.HdrToneMapper
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -238,9 +240,30 @@ class CameraController(private val context: Context) {
 
             reader.setOnImageAvailableListener({ imgReader ->
                 val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                val path = saveJpegImage(image)
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
                 image.close()
-                path?.let { onCaptureComplete?.invoke(it) }
+
+                // Auto/Proモードは軽い後処理を適用
+                val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (original != null) {
+                    val processed = ImageProcessor.process(original, ImageProcessor.ProcessingConfig(
+                        denoiseEnabled = true,
+                        denoiseStrength = ImageProcessor.DenoiseStrength.LIGHT,
+                        sharpenEnabled = true,
+                        sharpenAmount = 1.0f,
+                        autoLevelsEnabled = true,
+                        autoLevelsClip = 0.5f,
+                    ))
+                    original.recycle()
+                    val path = saveBitmap(processed, "JPEG")
+                    processed.recycle()
+                    path?.let { onCaptureComplete?.invoke(it) }
+                } else {
+                    val path = saveToMediaStore(bytes, "JPEG", "image/jpeg", ".jpg")
+                    path?.let { onCaptureComplete?.invoke(it) }
+                }
             }, cameraHandler)
 
             if (outputFormat == OutputFormat.RAW_DNG && rawImageReader != null) {
@@ -295,11 +318,11 @@ class CameraController(private val context: Context) {
 
             capturedCount++
             if (capturedCount >= frameCount) {
-                // Merge HDR frames
-                val merged = mergeHdrFrames(hdrImages)
-                val path = saveBitmap(merged, "HDR")
+                // Reinhard tone mapping + post-processing pipeline
+                val processed = ImageProcessor.processHdr(hdrImages)
+                val path = saveBitmap(processed, "HDR")
                 hdrImages.forEach { it.recycle() }
-                merged.recycle()
+                processed.recycle()
                 path?.let { onCaptureComplete?.invoke(it) }
             }
         }, cameraHandler)
@@ -351,10 +374,13 @@ class CameraController(private val context: Context) {
 
             capturedCount++
             if (capturedCount >= frameCount) {
-                val merged = mergeNightFrames(nightImages)
-                val path = saveBitmap(merged, "NIGHT")
+                // Frame stacking + noise reduction pipeline
+                val stacked = mergeNightFrames(nightImages)
+                val processed = ImageProcessor.processNight(stacked)
+                stacked.recycle()
+                val path = saveBitmap(processed, "NIGHT")
                 nightImages.forEach { it.recycle() }
-                merged.recycle()
+                processed.recycle()
                 path?.let { onCaptureComplete?.invoke(it) }
             }
         }, cameraHandler)
@@ -637,6 +663,11 @@ class CameraController(private val context: Context) {
             FileOutputStream(file).use { it.write(bytes) }
             file.absolutePath
         }
+    }
+
+    /** ReviewScreen等から後処理済みBitmapを保存するための公開API */
+    fun saveBitmapToMediaStore(bitmap: Bitmap): String? {
+        return saveBitmap(bitmap, "EDITED")
     }
 
     fun release() {

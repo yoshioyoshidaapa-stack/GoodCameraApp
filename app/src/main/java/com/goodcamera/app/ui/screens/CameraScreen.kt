@@ -23,6 +23,7 @@ import com.goodcamera.app.ui.viewmodel.CameraViewModel
 /**
  * メインのカメラ撮影画面
  * Camera2 APIのプレビュー表示、撮影モード切替、Pro手動制御を統合
+ * 撮影後は自動的にReviewScreenへ遷移し、後処理の調整・比較が可能
  */
 @Composable
 fun CameraScreen(
@@ -41,6 +42,16 @@ fun CameraScreen(
             val controller = CameraController(context)
             viewModel.initController(controller)
         }
+    }
+
+    // ReviewScreen表示
+    if (uiState.showReviewScreen && uiState.reviewImagePath != null) {
+        ReviewScreen(
+            imagePath = uiState.reviewImagePath!!,
+            onBack = { viewModel.closeReviewScreen() },
+            onSave = { bitmap -> viewModel.saveProcessedImage(bitmap) },
+        )
+        return
     }
 
     Box(
@@ -168,28 +179,6 @@ fun CameraScreen(
             ) {
                 Text(error)
             }
-        }
-
-        // 撮影完了通知
-        uiState.lastCapturedPath?.let {
-            LaunchedEffect(it) {
-                kotlinx.coroutines.delay(2000)
-                viewModel.clearLastCapture()
-            }
-            Text(
-                text = "保存しました",
-                color = Color.White,
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 48.dp)
-                    .background(
-                        Color(0xCC000000),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            )
         }
     }
 }

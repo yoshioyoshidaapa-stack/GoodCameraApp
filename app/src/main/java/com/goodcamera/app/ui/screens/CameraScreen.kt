@@ -4,6 +4,11 @@ import android.graphics.SurfaceTexture
 import android.view.TextureView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +55,7 @@ fun CameraScreen(
             imagePath = uiState.reviewImagePath!!,
             onBack = { viewModel.closeReviewScreen() },
             onSave = { bitmap -> viewModel.saveProcessedImage(bitmap) },
+            autoContrastEnabled = uiState.autoContrastEnabled,
         )
         return
     }
@@ -109,6 +115,18 @@ fun CameraScreen(
                 supportsRaw = uiState.capabilities.supportsRaw,
                 onFormatSelected = { viewModel.setOutputFormat(it) },
             )
+
+            // 自動コントラストトグル
+            IconButton(onClick = { viewModel.setAutoContrast(!uiState.autoContrastEnabled) }) {
+                Icon(
+                    Icons.Filled.Contrast,
+                    contentDescription = "自動コントラスト",
+                    tint = if (uiState.autoContrastEnabled)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        Color.White.copy(alpha = 0.4f),
+                )
+            }
 
             // 撮影モード表示
             Text(

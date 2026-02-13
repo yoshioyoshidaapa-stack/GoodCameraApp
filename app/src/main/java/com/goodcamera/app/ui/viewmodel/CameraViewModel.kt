@@ -117,6 +117,10 @@ class CameraViewModel : ViewModel() {
         )
     }
 
+    fun setAutoContrast(enabled: Boolean) {
+        _uiState.update { it.copy(autoContrastEnabled = enabled) }
+    }
+
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }

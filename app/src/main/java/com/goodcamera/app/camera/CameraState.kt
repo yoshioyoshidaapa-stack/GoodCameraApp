@@ -56,4 +56,5 @@ data class CameraUiState(
     val nightFrameCount: Int = 8,
     val showReviewScreen: Boolean = false,
     val reviewImagePath: String? = null,
+    val autoContrastEnabled: Boolean = true,
 )

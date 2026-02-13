@@ -36,6 +36,7 @@ fun ReviewScreen(
     imagePath: String,
     onBack: () -> Unit,
     onSave: (Bitmap) -> Unit,
+    autoContrastEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -52,7 +53,7 @@ fun ReviewScreen(
     var denoiseStrength by remember { mutableStateOf(ImageProcessor.DenoiseStrength.MEDIUM) }
     var sharpenEnabled by remember { mutableStateOf(true) }
     var sharpenAmount by remember { mutableFloatStateOf(1.2f) }
-    var autoLevelsEnabled by remember { mutableStateOf(true) }
+    var autoLevelsEnabled by remember { mutableStateOf(autoContrastEnabled) }
 
     // 画像をロード
     LaunchedEffect(imagePath) {

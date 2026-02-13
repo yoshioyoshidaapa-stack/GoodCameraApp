@@ -8,14 +8,16 @@ import android.graphics.Bitmap
  * 撮影モードに応じて最適な後処理チェーンを適用する。
  * 処理順序が画質に直結するため、順序を慎重に設計している:
  *   1. ノイズリダクション（先にノイズを消してからシャープニング）
- *   2. 自動レベル補正（トーンレンジを最適化）
- *   3. シャープニング（最後にエッジを強調）
+ *   2. ブレ/ピンぼけ自動補正（ブラー度を検出し適応的に復元）
+ *   3. 自動レベル補正（トーンレンジを最適化）
+ *   4. シャープニング（最後にエッジを強調）
  */
 object ImageProcessor {
 
     data class ProcessingConfig(
         val denoiseEnabled: Boolean = true,
         val denoiseStrength: DenoiseStrength = DenoiseStrength.MEDIUM,
+        val deblurEnabled: Boolean = true,
         val sharpenEnabled: Boolean = true,
         val sharpenAmount: Float = 1.2f,
         val autoLevelsEnabled: Boolean = true,
@@ -47,14 +49,24 @@ object ImageProcessor {
             result = denoised
         }
 
-        // Step 2: 自動レベル補正
+        // Step 2: ブレ/ピンぼけ自動補正
+        if (config.deblurEnabled) {
+            val analysis = DeblurFilter.detectBlur(result)
+            if (analysis.blurLevel != DeblurFilter.BlurLevel.SHARP) {
+                val corrected = DeblurFilter.correctBlur(result, analysis)
+                if (result !== bitmap) result.recycle()
+                result = corrected
+            }
+        }
+
+        // Step 3: 自動レベル補正
         if (config.autoLevelsEnabled) {
             val adjusted = AutoLevels.autoContrast(result, config.autoLevelsClip)
             if (result !== bitmap) result.recycle()
             result = adjusted
         }
 
-        // Step 3: シャープニング
+        // Step 4: シャープニング
         if (config.sharpenEnabled) {
             val sharpened = Sharpening.unsharpMask(
                 result,

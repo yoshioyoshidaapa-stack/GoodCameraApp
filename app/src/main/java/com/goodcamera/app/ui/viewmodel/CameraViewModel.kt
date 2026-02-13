@@ -117,6 +117,10 @@ class CameraViewModel : ViewModel() {
         )
     }
 
+    fun tapToFocus(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
+        cameraController?.tapToFocus(x, y, viewWidth, viewHeight)
+    }
+
     fun setAutoContrast(enabled: Boolean) {
         _uiState.update { it.copy(autoContrastEnabled = enabled) }
     }

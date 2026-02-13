@@ -5,7 +5,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Rect
 import android.hardware.camera2.*
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.Image
@@ -212,7 +214,7 @@ class CameraController(private val context: Context) {
         try {
             val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(surface)
-                applySettings(this, currentSettings)
+                applySettingsForPreview(this, currentSettings)
             }
             previewRequestBuilder = builder
             session.setRepeatingRequest(builder.build(), null, cameraHandler)
@@ -228,63 +230,118 @@ class CameraController(private val context: Context) {
         val session = captureSession ?: return
         val reader = imageReader ?: return
 
-        try {
-            val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                addTarget(reader.surface)
-                if (outputFormat == OutputFormat.RAW_DNG && rawImageReader != null) {
-                    addTarget(rawImageReader!!.surface)
+        // AFロック後に撮影を実行するラムダ
+        val doCapture = {
+            try {
+                val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                    addTarget(reader.surface)
+                    if (outputFormat == OutputFormat.RAW_DNG && rawImageReader != null) {
+                        addTarget(rawImageReader!!.surface)
+                    }
+                    applySettingsForCapture(this, currentSettings)
+                    set(CaptureRequest.JPEG_QUALITY, 98.toByte())
                 }
-                applySettings(this, currentSettings)
-                set(CaptureRequest.JPEG_QUALITY, 98.toByte())
-            }
 
-            reader.setOnImageAvailableListener({ imgReader ->
-                val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                val buffer = image.planes[0].buffer
-                val bytes = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                image.close()
-
-                // Auto/Proモードは軽い後処理を適用
-                val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                if (original != null) {
-                    val processed = ImageProcessor.process(original, ImageProcessor.ProcessingConfig(
-                        denoiseEnabled = true,
-                        denoiseStrength = ImageProcessor.DenoiseStrength.LIGHT,
-                        sharpenEnabled = true,
-                        sharpenAmount = 1.0f,
-                        autoLevelsEnabled = true,
-                        autoLevelsClip = 0.5f,
-                    ))
-                    original.recycle()
-                    val path = saveBitmap(processed, "JPEG")
-                    processed.recycle()
-                    path?.let { onCaptureComplete?.invoke(it) }
-                } else {
-                    val path = saveToMediaStore(bytes, "JPEG", "image/jpeg", ".jpg")
-                    path?.let { onCaptureComplete?.invoke(it) }
-                }
-            }, cameraHandler)
-
-            if (outputFormat == OutputFormat.RAW_DNG && rawImageReader != null) {
-                rawImageReader!!.setOnImageAvailableListener({ imgReader ->
+                reader.setOnImageAvailableListener({ imgReader ->
                     val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    saveDngImage(image)
+                    val buffer = image.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
                     image.close()
+
+                    // Auto/Proモードは軽い後処理を適用
+                    val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (original != null) {
+                        val processed = ImageProcessor.process(original, ImageProcessor.ProcessingConfig(
+                            denoiseEnabled = true,
+                            denoiseStrength = ImageProcessor.DenoiseStrength.LIGHT,
+                            sharpenEnabled = true,
+                            sharpenAmount = 1.0f,
+                            autoLevelsEnabled = true,
+                            autoLevelsClip = 0.5f,
+                        ))
+                        original.recycle()
+                        val path = saveBitmap(processed, "JPEG")
+                        processed.recycle()
+                        path?.let { onCaptureComplete?.invoke(it) }
+                    } else {
+                        val path = saveToMediaStore(bytes, "JPEG", "image/jpeg", ".jpg")
+                        path?.let { onCaptureComplete?.invoke(it) }
+                    }
                 }, cameraHandler)
+
+                if (outputFormat == OutputFormat.RAW_DNG && rawImageReader != null) {
+                    rawImageReader!!.setOnImageAvailableListener({ imgReader ->
+                        val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                        saveDngImage(image)
+                        image.close()
+                    }, cameraHandler)
+                }
+
+                session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureFailed(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        failure: CaptureFailure
+                    ) {
+                        onError?.invoke("Capture failed: ${failure.reason}")
+                    }
+                }, cameraHandler)
+            } catch (e: CameraAccessException) {
+                onError?.invoke("Capture error: ${e.message}")
             }
+        }
+
+        // AFがオートの場合、撮影前にAFロックを確認
+        if (currentSettings.autoFocus) {
+            precaptureAfAndRun(doCapture)
+        } else {
+            doCapture()
+        }
+    }
+
+    /**
+     * 撮影前にAFトリガーを発行し、ロック後にアクションを実行。
+     * タイムアウト付きで、ロック失敗時もフォールバックで撮影する。
+     */
+    private fun precaptureAfAndRun(onLocked: () -> Unit) {
+        val device = cameraDevice ?: run { onLocked(); return }
+        val session = captureSession ?: run { onLocked(); return }
+        val surface = previewSurface ?: run { onLocked(); return }
+
+        try {
+            val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(surface)
+                applySettingsForPreview(this, currentSettings)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                afRegion?.let {
+                    set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it))
+                }
+            }
+
+            // タイムアウト: 800ms 以内にロックしなければ撮影続行
+            val timeoutRunnable = Runnable { onLocked() }
+            cameraHandler.postDelayed(timeoutRunnable, 800)
 
             session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureFailed(
+                override fun onCaptureCompleted(
                     session: CameraCaptureSession,
                     request: CaptureRequest,
-                    failure: CaptureFailure
+                    result: TotalCaptureResult
                 ) {
-                    onError?.invoke("Capture failed: ${failure.reason}")
+                    val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+                    if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                        afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                    ) {
+                        cameraHandler.removeCallbacks(timeoutRunnable)
+                        onLocked()
+                    }
+                    // PASSIVE_FOCUSED 等の場合はタイムアウトに任せる
                 }
             }, cameraHandler)
         } catch (e: CameraAccessException) {
-            onError?.invoke("Capture error: ${e.message}")
+            onLocked() // エラー時はそのまま撮影
         }
     }
 
@@ -331,7 +388,8 @@ class CameraController(private val context: Context) {
             val requests = evSteps.map { ev ->
                 device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     addTarget(reader.surface)
-                    // Use AE with exposure compensation for bracketing
+                    applySettingsForCapture(this, currentSettings)
+                    // HDRブラケット: AE ONで露出補正を段階的に変更
                     set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                     set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, ev)
                     set(CaptureRequest.JPEG_QUALITY, 98.toByte())
@@ -390,6 +448,7 @@ class CameraController(private val context: Context) {
             val requests = (1..frameCount).map {
                 device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     addTarget(reader.surface)
+                    applySettingsForCapture(this, currentSettings)
                     // Manual exposure: high ISO + longer shutter for night
                     set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     set(CaptureRequest.SENSOR_SENSITIVITY, minOf(currentSettings.iso * 2, 3200))
@@ -505,9 +564,152 @@ class CameraController(private val context: Context) {
         return result
     }
 
+    // ---- Tap to Focus ----
+
+    private var afRegion: MeteringRectangle? = null
+
+    /**
+     * タップ位置にAFを合わせる。
+     * タッチ座標をセンサー座標に変換し、AF領域を設定してトリガーする。
+     */
+    fun tapToFocus(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
+        val cameraId = currentCameraId ?: return
+        val chars = cameraManager.getCameraCharacteristics(cameraId)
+        val sensorRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+        val maxRegions = chars.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+        if (maxRegions == 0) return
+
+        // タッチ座標 → センサー座標変換
+        val sensorX = (x / viewWidth * sensorRect.width()).toInt()
+        val sensorY = (y / viewHeight * sensorRect.height()).toInt()
+        val halfSize = (sensorRect.width() * 0.05f).toInt() // センサー幅の5%
+
+        val focusRect = Rect(
+            (sensorX - halfSize).coerceAtLeast(sensorRect.left),
+            (sensorY - halfSize).coerceAtLeast(sensorRect.top),
+            (sensorX + halfSize).coerceAtMost(sensorRect.right),
+            (sensorY + halfSize).coerceAtMost(sensorRect.bottom),
+        )
+        afRegion = MeteringRectangle(focusRect, MeteringRectangle.METERING_WEIGHT_MAX)
+
+        // AF トリガー発行
+        triggerAutoFocus()
+    }
+
+    /**
+     * AFトリガーを発行して高速フォーカスロック
+     */
+    private fun triggerAutoFocus() {
+        val device = cameraDevice ?: return
+        val session = captureSession ?: return
+        val surface = previewSurface ?: return
+
+        try {
+            // まずAFキャンセル
+            val cancelBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(surface)
+                applySettingsForPreview(this, currentSettings)
+                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+            }
+            session.capture(cancelBuilder.build(), null, cameraHandler)
+
+            // AFトリガー開始
+            val triggerBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(surface)
+                applySettingsForPreview(this, currentSettings)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                afRegion?.let {
+                    set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it))
+                }
+            }
+            session.capture(triggerBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    // AFロック後、通常プレビューに戻す（AF_MODEはAUTOのまま維持）
+                    updatePreviewRequest()
+                }
+            }, cameraHandler)
+        } catch (e: CameraAccessException) {
+            Log.e(TAG, "AF trigger error: ${e.message}")
+        }
+    }
+
     // ---- Settings Application ----
 
-    private fun applySettings(builder: CaptureRequest.Builder, settings: CameraSettings) {
+    /**
+     * プレビュー用: FAST モード + CONTINUOUS_VIDEO AF（低レイテンシ）
+     */
+    private fun applySettingsForPreview(builder: CaptureRequest.Builder, settings: CameraSettings) {
+        applyCommonSettings(builder, settings)
+
+        // プレビューは CONTINUOUS_VIDEO: フォーカス速度優先
+        if (settings.autoFocus) {
+            builder.set(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+            )
+            afRegion?.let {
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it))
+            }
+        } else {
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, settings.focusDistance)
+        }
+
+        // プレビューは高速処理優先
+        builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+        builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+        builder.set(CaptureRequest.HOT_PIXEL_MODE, CaptureRequest.HOT_PIXEL_MODE_FAST)
+        builder.set(CaptureRequest.SHADING_MODE, CaptureRequest.SHADING_MODE_FAST)
+    }
+
+    /**
+     * 撮影用: HIGH_QUALITY モード + CONTINUOUS_PICTURE AF（高精度）
+     */
+    private fun applySettingsForCapture(builder: CaptureRequest.Builder, settings: CameraSettings) {
+        applyCommonSettings(builder, settings)
+
+        // 撮影は CONTINUOUS_PICTURE: フォーカス精度優先
+        if (settings.autoFocus) {
+            builder.set(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            )
+            afRegion?.let {
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it))
+            }
+        } else {
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, settings.focusDistance)
+        }
+
+        // 撮影は画質最優先
+        builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+        builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_HIGH_QUALITY)
+        builder.set(CaptureRequest.HOT_PIXEL_MODE, CaptureRequest.HOT_PIXEL_MODE_HIGH_QUALITY)
+        builder.set(CaptureRequest.SHADING_MODE, CaptureRequest.SHADING_MODE_HIGH_QUALITY)
+        builder.set(CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+            CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY)
+
+        // OIS（光学手ブレ補正）が利用可能なら有効化
+        val cameraId = currentCameraId
+        if (cameraId != null) {
+            try {
+                val chars = cameraManager.getCameraCharacteristics(cameraId)
+                val oisModes = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+                if (oisModes != null && oisModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)) {
+                    builder.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+                }
+            } catch (_: CameraAccessException) { }
+        }
+    }
+
+    private fun applyCommonSettings(builder: CaptureRequest.Builder, settings: CameraSettings) {
         if (settings.autoExposure) {
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             builder.set(
@@ -518,16 +720,6 @@ class CameraController(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
             builder.set(CaptureRequest.SENSOR_SENSITIVITY, settings.iso)
             builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, settings.shutterSpeedNs)
-        }
-
-        if (settings.autoFocus) {
-            builder.set(
-                CaptureRequest.CONTROL_AF_MODE,
-                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-            )
-        } else {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, settings.focusDistance)
         }
 
         when (settings.whiteBalance) {

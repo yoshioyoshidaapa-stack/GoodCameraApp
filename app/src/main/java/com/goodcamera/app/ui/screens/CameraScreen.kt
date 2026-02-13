@@ -1,7 +1,11 @@
 package com.goodcamera.app.ui.screens
 
 import android.graphics.SurfaceTexture
+import android.view.MotionEvent
 import android.view.TextureView
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -15,7 +19,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -24,6 +30,7 @@ import com.goodcamera.app.camera.CameraController
 import com.goodcamera.app.camera.CaptureMode
 import com.goodcamera.app.ui.components.*
 import com.goodcamera.app.ui.viewmodel.CameraViewModel
+import kotlinx.coroutines.launch
 
 /**
  * メインのカメラ撮影画面
@@ -40,6 +47,12 @@ fun CameraScreen(
 
     // TextureViewの参照を保持
     var textureView by remember { mutableStateOf<TextureView?>(null) }
+
+    // タップフォーカスのインジケーター状態
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    val focusAlpha = remember { Animatable(0f) }
+    val focusScale = remember { Animatable(1.5f) }
+    val coroutineScope = rememberCoroutineScope()
 
     // CameraControllerの初期化
     LaunchedEffect(Unit) {
@@ -96,10 +109,41 @@ fun CameraScreen(
 
                         override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
                     }
+
+                    // タップフォーカス
+                    setOnTouchListener { v, event ->
+                        if (event.action == MotionEvent.ACTION_DOWN) {
+                            viewModel.tapToFocus(event.x, event.y, v.width, v.height)
+                            focusPoint = Offset(event.x, event.y)
+                            coroutineScope.launch {
+                                focusScale.snapTo(1.5f)
+                                focusAlpha.snapTo(1f)
+                                focusScale.animateTo(1f, tween(200))
+                                kotlinx.coroutines.delay(600)
+                                focusAlpha.animateTo(0f, tween(300))
+                            }
+                            v.performClick()
+                            true
+                        } else false
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        // フォーカスインジケーター
+        focusPoint?.let { point ->
+            if (focusAlpha.value > 0f) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawCircle(
+                        color = Color.White.copy(alpha = focusAlpha.value),
+                        radius = 40f * focusScale.value,
+                        center = point,
+                        style = Stroke(width = 2f),
+                    )
+                }
+            }
+        }
 
         // 上部: 出力形式セレクター
         Row(

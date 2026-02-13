@@ -52,6 +52,7 @@ fun ReviewScreen(
     var denoiseEnabled by remember { mutableStateOf(true) }
     var denoiseStrength by remember { mutableStateOf(ImageProcessor.DenoiseStrength.MEDIUM) }
     var deblurEnabled by remember { mutableStateOf(true) }
+    var perceptualEnabled by remember { mutableStateOf(true) }
     var sharpenEnabled by remember { mutableStateOf(true) }
     var sharpenAmount by remember { mutableFloatStateOf(1.2f) }
     var autoLevelsEnabled by remember { mutableStateOf(autoContrastEnabled) }
@@ -72,7 +73,7 @@ fun ReviewScreen(
     }
 
     // 後処理を適用
-    LaunchedEffect(originalBitmap, denoiseEnabled, denoiseStrength, deblurEnabled, sharpenEnabled, sharpenAmount, autoLevelsEnabled) {
+    LaunchedEffect(originalBitmap, denoiseEnabled, denoiseStrength, deblurEnabled, perceptualEnabled, sharpenEnabled, sharpenAmount, autoLevelsEnabled) {
         val original = originalBitmap ?: return@LaunchedEffect
         isProcessing = true
         withContext(Dispatchers.Default) {
@@ -80,6 +81,7 @@ fun ReviewScreen(
                 denoiseEnabled = denoiseEnabled,
                 denoiseStrength = denoiseStrength,
                 deblurEnabled = deblurEnabled,
+                perceptualEnabled = perceptualEnabled,
                 sharpenEnabled = sharpenEnabled,
                 sharpenAmount = sharpenAmount,
                 autoLevelsEnabled = autoLevelsEnabled,
@@ -154,12 +156,14 @@ fun ReviewScreen(
                     denoiseEnabled = denoiseEnabled,
                     denoiseStrength = denoiseStrength,
                     deblurEnabled = deblurEnabled,
+                    perceptualEnabled = perceptualEnabled,
                     sharpenEnabled = sharpenEnabled,
                     sharpenAmount = sharpenAmount,
                     autoLevelsEnabled = autoLevelsEnabled,
                     onDenoiseEnabledChanged = { denoiseEnabled = it },
                     onDenoiseStrengthChanged = { denoiseStrength = it },
                     onDeblurEnabledChanged = { deblurEnabled = it },
+                    onPerceptualEnabledChanged = { perceptualEnabled = it },
                     onSharpenEnabledChanged = { sharpenEnabled = it },
                     onSharpenAmountChanged = { sharpenAmount = it },
                     onAutoLevelsEnabledChanged = { autoLevelsEnabled = it },
@@ -197,12 +201,14 @@ private fun ProcessingSettingsPanel(
     denoiseEnabled: Boolean,
     denoiseStrength: ImageProcessor.DenoiseStrength,
     deblurEnabled: Boolean,
+    perceptualEnabled: Boolean,
     sharpenEnabled: Boolean,
     sharpenAmount: Float,
     autoLevelsEnabled: Boolean,
     onDenoiseEnabledChanged: (Boolean) -> Unit,
     onDenoiseStrengthChanged: (ImageProcessor.DenoiseStrength) -> Unit,
     onDeblurEnabledChanged: (Boolean) -> Unit,
+    onPerceptualEnabledChanged: (Boolean) -> Unit,
     onSharpenEnabledChanged: (Boolean) -> Unit,
     onSharpenAmountChanged: (Float) -> Unit,
     onAutoLevelsEnabledChanged: (Boolean) -> Unit,
@@ -255,6 +261,15 @@ private fun ProcessingSettingsPanel(
                 label = "ブレ/ピンぼけ補正",
                 enabled = deblurEnabled,
                 onEnabledChanged = onDeblurEnabledChanged,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 知覚補正
+            SettingRow(
+                label = "知覚補正（目の見え方に近く）",
+                enabled = perceptualEnabled,
+                onEnabledChanged = onPerceptualEnabledChanged,
             )
 
             Spacer(modifier = Modifier.height(8.dp))

@@ -10,7 +10,8 @@ import android.graphics.Bitmap
  *   1. ノイズリダクション（先にノイズを消してからシャープニング）
  *   2. ブレ/ピンぼけ自動補正（ブラー度を検出し適応的に復元）
  *   3. 自動レベル補正（トーンレンジを最適化）
- *   4. シャープニング（最後にエッジを強調）
+ *   4. 知覚補正（人間の視覚特性に基づく局所コントラスト・色恒常性・トーン）
+ *   5. シャープニング（最後にエッジを強調）
  */
 object ImageProcessor {
 
@@ -18,6 +19,7 @@ object ImageProcessor {
         val denoiseEnabled: Boolean = true,
         val denoiseStrength: DenoiseStrength = DenoiseStrength.MEDIUM,
         val deblurEnabled: Boolean = true,
+        val perceptualEnabled: Boolean = true,
         val sharpenEnabled: Boolean = true,
         val sharpenAmount: Float = 1.2f,
         val autoLevelsEnabled: Boolean = true,
@@ -66,7 +68,14 @@ object ImageProcessor {
             result = adjusted
         }
 
-        // Step 4: シャープニング
+        // Step 4: 知覚補正（人間の目と脳に近い補正）
+        if (config.perceptualEnabled) {
+            val enhanced = PerceptualEnhancer.enhance(result)
+            if (result !== bitmap) result.recycle()
+            result = enhanced
+        }
+
+        // Step 5: シャープニング
         if (config.sharpenEnabled) {
             val sharpened = Sharpening.unsharpMask(
                 result,

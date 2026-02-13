@@ -49,6 +49,7 @@ fun ReviewScreen(
     var showSettings by remember { mutableStateOf(false) }
 
     // 処理設定
+    var autoWbEnabled by remember { mutableStateOf(true) }
     var denoiseEnabled by remember { mutableStateOf(true) }
     var denoiseStrength by remember { mutableStateOf(ImageProcessor.DenoiseStrength.MEDIUM) }
     var deblurEnabled by remember { mutableStateOf(true) }
@@ -73,11 +74,12 @@ fun ReviewScreen(
     }
 
     // 後処理を適用
-    LaunchedEffect(originalBitmap, denoiseEnabled, denoiseStrength, deblurEnabled, perceptualEnabled, sharpenEnabled, sharpenAmount, autoLevelsEnabled) {
+    LaunchedEffect(originalBitmap, autoWbEnabled, denoiseEnabled, denoiseStrength, deblurEnabled, perceptualEnabled, sharpenEnabled, sharpenAmount, autoLevelsEnabled) {
         val original = originalBitmap ?: return@LaunchedEffect
         isProcessing = true
         withContext(Dispatchers.Default) {
             val config = ImageProcessor.ProcessingConfig(
+                autoWbEnabled = autoWbEnabled,
                 denoiseEnabled = denoiseEnabled,
                 denoiseStrength = denoiseStrength,
                 deblurEnabled = deblurEnabled,
@@ -153,6 +155,7 @@ fun ReviewScreen(
             // 設定パネル
             if (showSettings) {
                 ProcessingSettingsPanel(
+                    autoWbEnabled = autoWbEnabled,
                     denoiseEnabled = denoiseEnabled,
                     denoiseStrength = denoiseStrength,
                     deblurEnabled = deblurEnabled,
@@ -160,6 +163,7 @@ fun ReviewScreen(
                     sharpenEnabled = sharpenEnabled,
                     sharpenAmount = sharpenAmount,
                     autoLevelsEnabled = autoLevelsEnabled,
+                    onAutoWbEnabledChanged = { autoWbEnabled = it },
                     onDenoiseEnabledChanged = { denoiseEnabled = it },
                     onDenoiseStrengthChanged = { denoiseStrength = it },
                     onDeblurEnabledChanged = { deblurEnabled = it },
@@ -198,6 +202,7 @@ fun ReviewScreen(
 
 @Composable
 private fun ProcessingSettingsPanel(
+    autoWbEnabled: Boolean,
     denoiseEnabled: Boolean,
     denoiseStrength: ImageProcessor.DenoiseStrength,
     deblurEnabled: Boolean,
@@ -205,6 +210,7 @@ private fun ProcessingSettingsPanel(
     sharpenEnabled: Boolean,
     sharpenAmount: Float,
     autoLevelsEnabled: Boolean,
+    onAutoWbEnabledChanged: (Boolean) -> Unit,
     onDenoiseEnabledChanged: (Boolean) -> Unit,
     onDenoiseStrengthChanged: (ImageProcessor.DenoiseStrength) -> Unit,
     onDeblurEnabledChanged: (Boolean) -> Unit,
@@ -221,6 +227,15 @@ private fun ProcessingSettingsPanel(
         Column(modifier = Modifier.padding(16.dp)) {
             Text("後処理設定", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Spacer(modifier = Modifier.height(12.dp))
+
+            // 自動ホワイトバランス
+            SettingRow(
+                label = "自動ホワイトバランス",
+                enabled = autoWbEnabled,
+                onEnabledChanged = onAutoWbEnabledChanged,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             // ノイズリダクション
             SettingRow(

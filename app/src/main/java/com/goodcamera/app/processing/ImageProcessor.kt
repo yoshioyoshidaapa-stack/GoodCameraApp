@@ -7,15 +7,17 @@ import android.graphics.Bitmap
  *
  * 撮影モードに応じて最適な後処理チェーンを適用する。
  * 処理順序が画質に直結するため、順序を慎重に設計している:
- *   1. ノイズリダクション（先にノイズを消してからシャープニング）
- *   2. ブレ/ピンぼけ自動補正（ブラー度を検出し適応的に復元）
- *   3. 自動レベル補正（トーンレンジを最適化）
- *   4. 知覚補正（人間の視覚特性に基づく局所コントラスト・色恒常性・トーン）
- *   5. シャープニング（最後にエッジを強調）
+ *   1. 自動ホワイトバランス補正（色かぶりを最初に除去）
+ *   2. ノイズリダクション（ノイズを消してからシャープニング）
+ *   3. ブレ/ピンぼけ自動補正（ブラー度を検出し適応的に復元）
+ *   4. 自動レベル補正（トーンレンジを最適化）
+ *   5. 知覚補正（人間の視覚特性に基づく局所コントラスト・トーン）
+ *   6. シャープニング（最後にエッジを強調）
  */
 object ImageProcessor {
 
     data class ProcessingConfig(
+        val autoWbEnabled: Boolean = true,
         val denoiseEnabled: Boolean = true,
         val denoiseStrength: DenoiseStrength = DenoiseStrength.MEDIUM,
         val deblurEnabled: Boolean = true,
@@ -38,7 +40,14 @@ object ImageProcessor {
     fun process(bitmap: Bitmap, config: ProcessingConfig = ProcessingConfig()): Bitmap {
         var result = bitmap
 
-        // Step 1: ノイズリダクション
+        // Step 1: 自動ホワイトバランス補正（色かぶりを最初に除去）
+        if (config.autoWbEnabled) {
+            val wbCorrected = WhiteBalanceCorrector.correct(result)
+            if (result !== bitmap) result.recycle()
+            result = wbCorrected
+        }
+
+        // Step 2: ノイズリダクション
         if (config.denoiseEnabled) {
             val strength = config.denoiseStrength
             val denoised = NoiseReduction.bilateralFilter(
@@ -51,7 +60,7 @@ object ImageProcessor {
             result = denoised
         }
 
-        // Step 2: ブレ/ピンぼけ自動補正
+        // Step 3: ブレ/ピンぼけ自動補正
         if (config.deblurEnabled) {
             val analysis = DeblurFilter.detectBlur(result)
             if (analysis.blurLevel != DeblurFilter.BlurLevel.SHARP) {
@@ -61,21 +70,21 @@ object ImageProcessor {
             }
         }
 
-        // Step 3: 自動レベル補正
+        // Step 4: 自動レベル補正
         if (config.autoLevelsEnabled) {
             val adjusted = AutoLevels.autoContrast(result, config.autoLevelsClip)
             if (result !== bitmap) result.recycle()
             result = adjusted
         }
 
-        // Step 4: 知覚補正（人間の目と脳に近い補正）
+        // Step 5: 知覚補正（人間の目と脳に近い補正）
         if (config.perceptualEnabled) {
             val enhanced = PerceptualEnhancer.enhance(result)
             if (result !== bitmap) result.recycle()
             result = enhanced
         }
 
-        // Step 5: シャープニング
+        // Step 6: シャープニング
         if (config.sharpenEnabled) {
             val sharpened = Sharpening.unsharpMask(
                 result,

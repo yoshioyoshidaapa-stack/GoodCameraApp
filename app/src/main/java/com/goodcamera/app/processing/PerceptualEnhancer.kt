@@ -14,17 +14,15 @@ import kotlin.math.sqrt
  *    → 網膜の側抑制: 目は局所的な明暗差に適応し、暗い場所と明るい場所を
  *      同時に知覚できる。グローバルなヒストグラム補正では再現できない。
  *
- * 2. 色恒常性補正 (Gray World)
- *    → 脳の色恒常性: 照明が変わっても物体の色を一定に知覚する能力。
- *      グレーワールド仮定でシーン全体の色かぶりを除去する。
- *
- * 3. 中間トーン彩度ブースト
+ * 2. 中間トーン彩度ブースト
  *    → 記憶色効果: 人は実際より鮮やかな色を記憶する傾向がある。
  *      中間トーンのみ控えめに彩度を上げることで「見た印象」に近づける。
  *
- * 4. 対数的輝度圧縮
+ * 3. 対数的輝度圧縮
  *    → Weber-Fechner の法則: 人の輝度知覚は対数的。
  *      シャドウを持ち上げハイライトを抑えることで、目で見た印象に近づける。
+ *
+ * ※ 色恒常性（ホワイトバランス）は WhiteBalanceCorrector に分離済み
  */
 object PerceptualEnhancer {
 
@@ -37,55 +35,18 @@ object PerceptualEnhancer {
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        // Step 1: 色恒常性補正（Gray World）
-        applyColorConstancy(pixels)
-
-        // Step 2: 局所コントラスト適応（CLAHE風）
+        // Step 1: 局所コントラスト適応（CLAHE風）
         applyLocalContrastAdaptation(pixels, width, height)
 
-        // Step 3: 対数的輝度圧縮（Weber-Fechner）
+        // Step 2: 対数的輝度圧縮（Weber-Fechner）
         applyPerceptualToneMap(pixels)
 
-        // Step 4: 中間トーン彩度ブースト（記憶色効果）
+        // Step 3: 中間トーン彩度ブースト（記憶色効果）
         applyMemoryColorBoost(pixels)
 
         val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         output.setPixels(pixels, 0, width, 0, 0, width, height)
         return output
-    }
-
-    /**
-     * 色恒常性補正 (Gray World Assumption)
-     *
-     * 脳は「世界の平均色はグレー」と仮定して色かぶりを補正している。
-     * 各チャンネルの平均値を128に近づけることで、蛍光灯やタングステンの
-     * 色かぶりを自動補正する。
-     */
-    private fun applyColorConstancy(pixels: IntArray) {
-        var sumR = 0L; var sumG = 0L; var sumB = 0L
-        for (pixel in pixels) {
-            sumR += (pixel shr 16) and 0xFF
-            sumG += (pixel shr 8) and 0xFF
-            sumB += pixel and 0xFF
-        }
-
-        val n = pixels.size.toLong()
-        val avgR = sumR.toFloat() / n
-        val avgG = sumG.toFloat() / n
-        val avgB = sumB.toFloat() / n
-        val avgAll = (avgR + avgG + avgB) / 3f
-
-        // 補正が極端にならないようクランプ（0.8〜1.2倍）
-        val scaleR = (avgAll / avgR.coerceAtLeast(1f)).coerceIn(0.8f, 1.2f)
-        val scaleG = (avgAll / avgG.coerceAtLeast(1f)).coerceIn(0.8f, 1.2f)
-        val scaleB = (avgAll / avgB.coerceAtLeast(1f)).coerceIn(0.8f, 1.2f)
-
-        for (i in pixels.indices) {
-            val r = ((pixels[i] shr 16 and 0xFF) * scaleR).toInt().coerceIn(0, 255)
-            val g = ((pixels[i] shr 8 and 0xFF) * scaleG).toInt().coerceIn(0, 255)
-            val b = ((pixels[i] and 0xFF) * scaleB).toInt().coerceIn(0, 255)
-            pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
     }
 
     /**

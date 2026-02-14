@@ -7,12 +7,19 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,12 +29,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.goodcamera.app.camera.CameraController
+import com.goodcamera.app.camera.AppScreen
 import com.goodcamera.app.camera.CaptureMode
+import com.goodcamera.app.camera.CameraController
+import com.goodcamera.app.camera.GridType
 import com.goodcamera.app.ui.components.*
 import com.goodcamera.app.ui.viewmodel.CameraViewModel
 import kotlinx.coroutines.launch
@@ -131,6 +142,21 @@ fun CameraScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // ピンチズーム検出
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(uiState.maxZoom) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        val newZoom = uiState.zoomLevel * zoom
+                        viewModel.setZoomLevel(newZoom)
+                    }
+                },
+        )
+
+        // グリッドオーバーレイ
+        GridOverlay(gridType = uiState.gridType)
+
         // フォーカスインジケーター
         focusPoint?.let { point ->
             if (focusAlpha.value > 0f) {
@@ -145,39 +171,138 @@ fun CameraScreen(
             }
         }
 
-        // 上部: 出力形式セレクター
+        // タイマーカウントダウン表示
+        if (uiState.timerCountdown > 0) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = uiState.timerCountdown.toString(),
+                    color = Color.White,
+                    fontSize = 96.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        // 上部: コントロールバー
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+                .padding(top = 8.dp, start = 8.dp, end = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FormatSelector(
-                currentFormat = uiState.outputFormat,
-                supportsRaw = uiState.capabilities.supportsRaw,
-                onFormatSelected = { viewModel.setOutputFormat(it) },
-            )
-
-            // 自動コントラストトグル
-            IconButton(onClick = { viewModel.setAutoContrast(!uiState.autoContrastEnabled) }) {
-                Icon(
-                    Icons.Filled.Contrast,
-                    contentDescription = "自動コントラスト",
-                    tint = if (uiState.autoContrastEnabled)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        Color.White.copy(alpha = 0.4f),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FormatSelector(
+                    currentFormat = uiState.outputFormat,
+                    supportsRaw = uiState.capabilities.supportsRaw,
+                    onFormatSelected = { viewModel.setOutputFormat(it) },
                 )
             }
 
-            // 撮影モード表示
-            Text(
-                text = uiState.captureMode.label,
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // タイマーボタン
+                IconButton(onClick = {
+                    val next = when (uiState.timerSeconds) {
+                        0 -> 3
+                        3 -> 5
+                        5 -> 10
+                        else -> 0
+                    }
+                    viewModel.setTimerSeconds(next)
+                }) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Filled.Timer,
+                            contentDescription = "タイマー",
+                            tint = if (uiState.timerSeconds > 0)
+                                MaterialTheme.colorScheme.primary
+                            else Color.White.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                        if (uiState.timerSeconds > 0) {
+                            Text(
+                                "${uiState.timerSeconds}s",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 9.sp,
+                            )
+                        }
+                    }
+                }
+
+                // グリッドボタン
+                IconButton(onClick = {
+                    val next = when (uiState.gridType) {
+                        GridType.NONE -> GridType.RULE_OF_THIRDS
+                        GridType.RULE_OF_THIRDS -> GridType.GOLDEN_RATIO
+                        GridType.GOLDEN_RATIO -> GridType.CROSSHAIR
+                        GridType.CROSSHAIR -> GridType.NONE
+                    }
+                    viewModel.setGridType(next)
+                }) {
+                    Icon(
+                        Icons.Filled.GridOn,
+                        contentDescription = "グリッド",
+                        tint = if (uiState.gridType != GridType.NONE)
+                            MaterialTheme.colorScheme.primary
+                        else Color.White.copy(alpha = 0.4f),
+                    )
+                }
+
+                // 自動コントラストトグル
+                IconButton(onClick = { viewModel.setAutoContrast(!uiState.autoContrastEnabled) }) {
+                    Icon(
+                        Icons.Filled.Contrast,
+                        contentDescription = "自動コントラスト",
+                        tint = if (uiState.autoContrastEnabled)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            Color.White.copy(alpha = 0.4f),
+                    )
+                }
+
+                // 設定ボタン
+                IconButton(onClick = { viewModel.navigateTo(AppScreen.SETTINGS) }) {
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = "設定",
+                        tint = Color.White.copy(alpha = 0.7f),
+                    )
+                }
+            }
+        }
+
+        // ズームスライダー（右側）
+        if (uiState.maxZoom > 1f) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 8.dp)
+                    .height(200.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = String.format("%.1fx", uiState.zoomLevel),
+                    color = Color.White,
+                    fontSize = 11.sp,
+                )
+                Slider(
+                    value = uiState.zoomLevel,
+                    onValueChange = { viewModel.setZoomLevel(it) },
+                    valueRange = 1f..uiState.maxZoom,
+                    modifier = Modifier
+                        .weight(1f)
+                        .width(48.dp),
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                    ),
+                )
+            }
         }
 
         // 下部コントロール群
@@ -213,18 +338,44 @@ fun CameraScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // シャッターボタン & カメラ切替
-            CaptureControls(
-                isCaptureInProgress = uiState.isCaptureInProgress,
-                onCapture = { viewModel.capturePhoto() },
-                onSwitchCamera = {
-                    textureView?.let { tv ->
-                        val st = tv.surfaceTexture ?: return@let
-                        val surface = android.view.Surface(st)
-                        viewModel.switchCamera(surface)
-                    }
-                },
-            )
+            // シャッターボタン & ギャラリー & カメラ切替
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // ギャラリーボタン
+                IconButton(
+                    onClick = { viewModel.navigateTo(AppScreen.GALLERY) },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Collections,
+                        contentDescription = "ギャラリー",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+
+                // シャッターボタン
+                CaptureControls(
+                    isCaptureInProgress = uiState.isCaptureInProgress || uiState.timerCountdown > 0,
+                    onCapture = {
+                        if (uiState.timerCountdown > 0) {
+                            viewModel.cancelTimer()
+                        } else {
+                            viewModel.capturePhoto()
+                        }
+                    },
+                    onSwitchCamera = {
+                        textureView?.let { tv ->
+                            val st = tv.surfaceTexture ?: return@let
+                            val surface = android.view.Surface(st)
+                            viewModel.switchCamera(surface)
+                        }
+                    },
+                )
+            }
         }
 
         // エラーメッセージ表示

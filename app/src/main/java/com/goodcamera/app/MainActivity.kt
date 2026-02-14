@@ -11,6 +11,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -18,7 +20,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.goodcamera.app.camera.AppScreen
 import com.goodcamera.app.ui.screens.CameraScreen
+import com.goodcamera.app.ui.screens.GalleryScreen
+import com.goodcamera.app.ui.screens.SettingsScreen
 import com.goodcamera.app.ui.theme.GoodCameraTheme
 import com.goodcamera.app.ui.viewmodel.CameraViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -47,7 +52,29 @@ private fun CameraAppContent() {
 
     if (cameraPermissionState.status.isGranted) {
         val viewModel: CameraViewModel = viewModel()
-        CameraScreen(viewModel = viewModel)
+        val uiState by viewModel.uiState.collectAsState()
+
+        when (uiState.currentScreen) {
+            AppScreen.CAMERA -> {
+                CameraScreen(viewModel = viewModel)
+            }
+            AppScreen.GALLERY -> {
+                GalleryScreen(
+                    onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
+                )
+            }
+            AppScreen.SETTINGS -> {
+                SettingsScreen(
+                    gridType = uiState.gridType,
+                    timerSeconds = uiState.timerSeconds,
+                    autoContrastEnabled = uiState.autoContrastEnabled,
+                    onGridTypeChanged = { viewModel.setGridType(it) },
+                    onTimerSecondsChanged = { viewModel.setTimerSeconds(it) },
+                    onAutoContrastChanged = { viewModel.setAutoContrast(it) },
+                    onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
+                )
+            }
+        }
     } else {
         PermissionRequestScreen(
             shouldShowRationale = cameraPermissionState.status.shouldShowRationale,

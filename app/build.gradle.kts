@@ -78,6 +78,11 @@ dependencies {
     // Accompanist permissions
     implementation("com.google.accompanist:accompanist-permissions:0.34.0")
 
+    // Test
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.11.1")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

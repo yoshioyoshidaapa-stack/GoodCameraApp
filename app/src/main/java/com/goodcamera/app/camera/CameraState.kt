@@ -42,6 +42,19 @@ data class CameraCapabilities(
     val supportedIsos: List<Int> = listOf(100, 200, 400, 800, 1600, 3200),
 )
 
+enum class GridType(val label: String) {
+    NONE("OFF"),
+    RULE_OF_THIRDS("3x3"),
+    GOLDEN_RATIO("Golden"),
+    CROSSHAIR("+"),
+}
+
+enum class AppScreen {
+    CAMERA,
+    GALLERY,
+    SETTINGS,
+}
+
 data class CameraUiState(
     val isPreviewActive: Boolean = false,
     val isCaptureInProgress: Boolean = false,
@@ -57,4 +70,10 @@ data class CameraUiState(
     val showReviewScreen: Boolean = false,
     val reviewImagePath: String? = null,
     val autoContrastEnabled: Boolean = true,
+    val zoomLevel: Float = 1f,
+    val maxZoom: Float = 1f,
+    val gridType: GridType = GridType.NONE,
+    val timerSeconds: Int = 0,
+    val timerCountdown: Int = 0,
+    val currentScreen: AppScreen = AppScreen.CAMERA,
 )

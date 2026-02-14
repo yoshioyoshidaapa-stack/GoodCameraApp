@@ -1,5 +1,6 @@
 package com.goodcamera.app.ui.screens
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Compare
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,9 +25,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.goodcamera.app.processing.ImageProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * 撮影後レビュー画面
@@ -136,10 +141,37 @@ fun ReviewScreen(
                 fontSize = 14.sp,
             )
 
-            IconButton(onClick = {
-                processedBitmap?.let { onSave(it) }
-            }) {
-                Icon(Icons.Filled.Check, "保存", tint = MaterialTheme.colorScheme.primary)
+            Row {
+                // 共有ボタン
+                IconButton(onClick = {
+                    val bitmap = processedBitmap ?: originalBitmap ?: return@IconButton
+                    val cacheDir = File(context.cacheDir, "shared_images")
+                    cacheDir.mkdirs()
+                    val file = File(cacheDir, "GoodCam_share.jpg")
+                    FileOutputStream(file).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    }
+                    val uri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file,
+                    )
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/jpeg"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "共有"))
+                }) {
+                    Icon(Icons.Filled.Share, "共有", tint = Color.White)
+                }
+
+                // 保存ボタン
+                IconButton(onClick = {
+                    processedBitmap?.let { onSave(it) }
+                }) {
+                    Icon(Icons.Filled.Check, "保存", tint = MaterialTheme.colorScheme.primary)
+                }
             }
         }
 

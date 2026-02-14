@@ -3,11 +3,15 @@ package com.goodcamera.app.ui.viewmodel
 import android.graphics.Bitmap
 import android.view.Surface
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.goodcamera.app.camera.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class CameraViewModel : ViewModel() {
 
@@ -17,11 +21,14 @@ class CameraViewModel : ViewModel() {
     var cameraController: CameraController? = null
         private set
 
+    private var timerJob: Job? = null
+
     fun initController(controller: CameraController) {
         cameraController = controller
 
         controller.onCapabilities = { caps ->
-            _uiState.update { it.copy(capabilities = caps) }
+            val maxZoom = controller.getMaxZoom()
+            _uiState.update { it.copy(capabilities = caps, maxZoom = maxZoom) }
         }
 
         controller.onCaptureComplete = { path ->
@@ -48,7 +55,7 @@ class CameraViewModel : ViewModel() {
 
     fun switchCamera(surface: Surface) {
         val useFront = !_uiState.value.usingFrontCamera
-        _uiState.update { it.copy(usingFrontCamera = useFront) }
+        _uiState.update { it.copy(usingFrontCamera = useFront, zoomLevel = 1f) }
         cameraController?.switchCamera(useFront, surface)
     }
 
@@ -56,7 +63,7 @@ class CameraViewModel : ViewModel() {
         _uiState.update { state ->
             val newSettings = when (mode) {
                 CaptureMode.AUTO -> state.settings.copy(autoExposure = true, autoFocus = true)
-                CaptureMode.PRO -> state.settings // Pro: ユーザーが自由に設定
+                CaptureMode.PRO -> state.settings
                 CaptureMode.HDR -> state.settings.copy(autoExposure = true, autoFocus = true)
                 CaptureMode.NIGHT -> state.settings.copy(autoFocus = true)
             }
@@ -104,10 +111,51 @@ class CameraViewModel : ViewModel() {
         applySettings()
     }
 
+    // ---- ズーム ----
+
+    fun setZoomLevel(zoom: Float) {
+        val state = _uiState.value
+        val clamped = zoom.coerceIn(1f, state.maxZoom)
+        _uiState.update { it.copy(zoomLevel = clamped) }
+        cameraController?.setZoom(clamped)
+    }
+
+    // ---- セルフタイマー ----
+
+    fun setTimerSeconds(seconds: Int) {
+        _uiState.update { it.copy(timerSeconds = seconds) }
+    }
+
     fun capturePhoto() {
         val state = _uiState.value
-        if (state.isCaptureInProgress) return
+        if (state.isCaptureInProgress || state.timerCountdown > 0) return
 
+        if (state.timerSeconds > 0) {
+            startTimerCapture(state.timerSeconds)
+        } else {
+            doCapture()
+        }
+    }
+
+    private fun startTimerCapture(seconds: Int) {
+        timerJob?.cancel()
+        timerJob = viewModelScope.launch {
+            for (i in seconds downTo 1) {
+                _uiState.update { it.copy(timerCountdown = i) }
+                delay(1000)
+            }
+            _uiState.update { it.copy(timerCountdown = 0) }
+            doCapture()
+        }
+    }
+
+    fun cancelTimer() {
+        timerJob?.cancel()
+        _uiState.update { it.copy(timerCountdown = 0) }
+    }
+
+    private fun doCapture() {
+        val state = _uiState.value
         _uiState.update { it.copy(isCaptureInProgress = true) }
         cameraController?.capturePhoto(
             mode = state.captureMode,
@@ -116,6 +164,20 @@ class CameraViewModel : ViewModel() {
             nightFrames = state.nightFrameCount,
         )
     }
+
+    // ---- グリッド ----
+
+    fun setGridType(type: GridType) {
+        _uiState.update { it.copy(gridType = type) }
+    }
+
+    // ---- ナビゲーション ----
+
+    fun navigateTo(screen: AppScreen) {
+        _uiState.update { it.copy(currentScreen = screen) }
+    }
+
+    // ---- タップフォーカス ----
 
     fun tapToFocus(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
         cameraController?.tapToFocus(x, y, viewWidth, viewHeight)
@@ -152,6 +214,7 @@ class CameraViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
+        timerJob?.cancel()
         cameraController?.release()
     }
 }

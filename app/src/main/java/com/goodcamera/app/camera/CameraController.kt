@@ -564,6 +564,44 @@ class CameraController(private val context: Context) {
         return result
     }
 
+    // ---- Zoom ----
+
+    private var currentZoomLevel: Float = 1f
+
+    fun getMaxZoom(): Float {
+        val cameraId = currentCameraId ?: return 1f
+        val chars = cameraManager.getCameraCharacteristics(cameraId)
+        return chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+    }
+
+    fun setZoom(zoomLevel: Float) {
+        currentZoomLevel = zoomLevel
+        val cameraId = currentCameraId ?: return
+        val chars = cameraManager.getCameraCharacteristics(cameraId)
+        val maxZoom = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+        val zoom = zoomLevel.coerceIn(1f, maxZoom)
+
+        val sensorRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+        val centerX = sensorRect.width() / 2
+        val centerY = sensorRect.height() / 2
+        val deltaX = (sensorRect.width() / (2f * zoom)).toInt()
+        val deltaY = (sensorRect.height() / (2f * zoom)).toInt()
+
+        val cropRegion = Rect(
+            centerX - deltaX,
+            centerY - deltaY,
+            centerX + deltaX,
+            centerY + deltaY,
+        )
+
+        previewRequestBuilder?.let { builder ->
+            builder.set(CaptureRequest.SCALER_CROP_REGION, cropRegion)
+            try {
+                captureSession?.setRepeatingRequest(builder.build(), null, cameraHandler)
+            } catch (_: CameraAccessException) { }
+        }
+    }
+
     // ---- Tap to Focus ----
 
     private var afRegion: MeteringRectangle? = null

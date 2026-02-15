@@ -64,6 +64,8 @@ fun ReviewScreen(
     var sharpenEnabled by remember { mutableStateOf(aiConfig?.sharpenEnabled ?: true) }
     var sharpenAmount by remember { mutableFloatStateOf(aiConfig?.sharpenAmount ?: 1.2f) }
     var autoLevelsEnabled by remember { mutableStateOf(aiConfig?.autoLevelsEnabled ?: autoContrastEnabled) }
+    var dehazeEnabled by remember { mutableStateOf(aiConfig?.dehazeEnabled ?: false) }
+    var dehazeStrength by remember { mutableFloatStateOf(aiConfig?.dehazeStrength ?: 0.7f) }
 
     // 画像をロード
     LaunchedEffect(imagePath) {
@@ -81,7 +83,7 @@ fun ReviewScreen(
     }
 
     // 後処理を適用
-    LaunchedEffect(originalBitmap, autoWbEnabled, denoiseEnabled, denoiseStrength, deblurEnabled, perceptualEnabled, sharpenEnabled, sharpenAmount, autoLevelsEnabled) {
+    LaunchedEffect(originalBitmap, autoWbEnabled, denoiseEnabled, denoiseStrength, deblurEnabled, perceptualEnabled, sharpenEnabled, sharpenAmount, autoLevelsEnabled, dehazeEnabled, dehazeStrength) {
         val original = originalBitmap ?: return@LaunchedEffect
         isProcessing = true
         withContext(Dispatchers.Default) {
@@ -94,6 +96,8 @@ fun ReviewScreen(
                 sharpenEnabled = sharpenEnabled,
                 sharpenAmount = sharpenAmount,
                 autoLevelsEnabled = autoLevelsEnabled,
+                dehazeEnabled = dehazeEnabled,
+                dehazeStrength = dehazeStrength,
             )
             processedBitmap = ImageProcessor.process(original, config)
         }
@@ -197,6 +201,8 @@ fun ReviewScreen(
                     sharpenEnabled = sharpenEnabled,
                     sharpenAmount = sharpenAmount,
                     autoLevelsEnabled = autoLevelsEnabled,
+                    dehazeEnabled = dehazeEnabled,
+                    dehazeStrength = dehazeStrength,
                     onAutoWbEnabledChanged = { autoWbEnabled = it },
                     onDenoiseEnabledChanged = { denoiseEnabled = it },
                     onDenoiseStrengthChanged = { denoiseStrength = it },
@@ -205,6 +211,8 @@ fun ReviewScreen(
                     onSharpenEnabledChanged = { sharpenEnabled = it },
                     onSharpenAmountChanged = { sharpenAmount = it },
                     onAutoLevelsEnabledChanged = { autoLevelsEnabled = it },
+                    onDehazeEnabledChanged = { dehazeEnabled = it },
+                    onDehazeStrengthChanged = { dehazeStrength = it },
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -244,6 +252,8 @@ private fun ProcessingSettingsPanel(
     sharpenEnabled: Boolean,
     sharpenAmount: Float,
     autoLevelsEnabled: Boolean,
+    dehazeEnabled: Boolean,
+    dehazeStrength: Float,
     onAutoWbEnabledChanged: (Boolean) -> Unit,
     onDenoiseEnabledChanged: (Boolean) -> Unit,
     onDenoiseStrengthChanged: (ImageProcessor.DenoiseStrength) -> Unit,
@@ -252,6 +262,8 @@ private fun ProcessingSettingsPanel(
     onSharpenEnabledChanged: (Boolean) -> Unit,
     onSharpenAmountChanged: (Float) -> Unit,
     onAutoLevelsEnabledChanged: (Boolean) -> Unit,
+    onDehazeEnabledChanged: (Boolean) -> Unit,
+    onDehazeStrengthChanged: (Float) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -359,6 +371,36 @@ private fun ProcessingSettingsPanel(
                 enabled = autoLevelsEnabled,
                 onEnabledChanged = onAutoLevelsEnabledChanged,
             )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // かすみ除去
+            SettingRow(
+                label = "かすみ除去",
+                enabled = dehazeEnabled,
+                onEnabledChanged = onDehazeEnabledChanged,
+            )
+            if (dehazeEnabled) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("弱", color = Color.Gray, fontSize = 11.sp)
+                    Slider(
+                        value = dehazeStrength,
+                        onValueChange = onDehazeStrengthChanged,
+                        valueRange = 0.2f..1.0f,
+                        modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                    Text("強", color = Color.Gray, fontSize = 11.sp)
+                }
+            }
         }
     }
 }

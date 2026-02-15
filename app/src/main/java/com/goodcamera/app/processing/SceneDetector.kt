@@ -42,6 +42,7 @@ object SceneDetector {
         val warmRatio: Float,
         val isLowLight: Boolean,
         val isHighContrast: Boolean,
+        val hazeLevel: Float = 0f,
     )
 
     /**
@@ -70,6 +71,9 @@ object SceneDetector {
         val saturation = analyzeAverageSaturation(pixels)
         val isLowLight = brightness < 50f
         val isHighContrast = dynamicRange > 180f
+
+        // かすみ度推定: ダークチャネルの平均値（高いほどかすみが強い）
+        val hazeLevel = estimateHazeFromPixels(pixels)
 
         // シーン推定（各シーンのスコアを計算し、最高スコアを採用）
         val scores = mutableMapOf<SceneType, Float>()
@@ -147,6 +151,7 @@ object SceneDetector {
             warmRatio = warmRatio,
             isLowLight = isLowLight,
             isHighContrast = isHighContrast,
+            hazeLevel = hazeLevel,
         )
     }
 
@@ -196,6 +201,9 @@ object SceneDetector {
                     autoLevelsEnabled = true,
                     autoLevelsClip = 1.0f,
                     perceptualEnabled = true,
+                    // かすみ度0.3以上で自動有効、強度はかすみ度に比例
+                    dehazeEnabled = analysis.hazeLevel > 0.3f,
+                    dehazeStrength = (analysis.hazeLevel * 1.0f).coerceIn(0.3f, 0.9f),
                 ),
             )
             SceneType.FOOD -> SceneRecommendation(
@@ -483,5 +491,22 @@ object SceneDetector {
         val g = (pixel shr 8) and 0xFF
         val b = pixel and 0xFF
         return (0.299f * r + 0.587f * g + 0.114f * b).toInt()
+    }
+
+    /**
+     * かすみ度推定（ダークチャネルベース）
+     * 各ピクセルのRGB最小値の平均を計算。
+     * かすみが強いほどこの値が高くなる（白っぽいため暗チャネルが上昇）。
+     */
+    private fun estimateHazeFromPixels(pixels: IntArray): Float {
+        var darkSum = 0L
+        for (pixel in pixels) {
+            val r = (pixel shr 16) and 0xFF
+            val g = (pixel shr 8) and 0xFF
+            val b = pixel and 0xFF
+            darkSum += minOf(r, g, b)
+        }
+        val avgDark = darkSum.toFloat() / pixels.size
+        return (avgDark / 100f).coerceIn(0f, 1f)
     }
 }

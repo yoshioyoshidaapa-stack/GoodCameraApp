@@ -35,6 +35,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.goodcamera.app.camera.AppScreen
 import com.goodcamera.app.camera.CaptureMode
 import com.goodcamera.app.camera.CameraController
@@ -80,6 +84,8 @@ fun CameraScreen(
             onBack = { viewModel.closeReviewScreen() },
             onSave = { bitmap -> viewModel.saveProcessedImage(bitmap) },
             autoContrastEnabled = uiState.autoContrastEnabled,
+            aiProcessingConfig = if (uiState.captureMode == CaptureMode.AI_AUTO)
+                viewModel.lastSceneRecommendation?.processingConfig else null,
         )
         return
     }
@@ -100,6 +106,7 @@ fun CameraScreen(
                             height: Int,
                         ) {
                             textureView = this@apply
+                            viewModel.previewTextureView = this@apply
                             val previewSurface = android.view.Surface(surface)
                             viewModel.openCamera(
                                 useFront = uiState.usingFrontCamera,
@@ -183,6 +190,51 @@ fun CameraScreen(
                     fontSize = 96.sp,
                     fontWeight = FontWeight.Bold,
                 )
+            }
+        }
+
+        // AIモード: シーン検出バッジ
+        AnimatedVisibility(
+            visible = uiState.captureMode == CaptureMode.AI_AUTO && uiState.aiDetectedScene.isNotEmpty(),
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 56.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(20.dp),
+                    )
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = "AI",
+                        color = Color.Black,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = uiState.aiDetectedScene,
+                        color = Color.Black,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    if (uiState.aiConfidence >= 0.7f) {
+                        Text(
+                            text = "${(uiState.aiConfidence * 100).toInt()}%",
+                            color = Color.Black.copy(alpha = 0.6f),
+                            fontSize = 10.sp,
+                        )
+                    }
+                }
             }
         }
 

@@ -23,6 +23,7 @@ enum class WhiteBalanceMode(val label: String, val kelvin: Int) {
 }
 
 enum class CaptureMode(val label: String) {
+    AI_AUTO("AI"),
     AUTO("Auto"),
     PRO("Pro"),
     HDR("HDR"),
@@ -58,7 +59,7 @@ enum class AppScreen {
 data class CameraUiState(
     val isPreviewActive: Boolean = false,
     val isCaptureInProgress: Boolean = false,
-    val captureMode: CaptureMode = CaptureMode.AUTO,
+    val captureMode: CaptureMode = CaptureMode.AI_AUTO,
     val outputFormat: OutputFormat = OutputFormat.JPEG,
     val settings: CameraSettings = CameraSettings(),
     val capabilities: CameraCapabilities = CameraCapabilities(),
@@ -76,4 +77,8 @@ data class CameraUiState(
     val timerSeconds: Int = 0,
     val timerCountdown: Int = 0,
     val currentScreen: AppScreen = AppScreen.CAMERA,
+    // AI Auto Mode
+    val aiDetectedScene: String = "",
+    val aiConfidence: Float = 0f,
+    val aiAnalyzing: Boolean = false,
 )

@@ -106,7 +106,7 @@ class CameraController(private val context: Context) {
 
     fun capturePhoto(mode: CaptureMode, outputFormat: OutputFormat, hdrFrames: Int = 3, nightFrames: Int = 8) {
         when (mode) {
-            CaptureMode.AUTO, CaptureMode.PRO -> captureSingle(outputFormat)
+            CaptureMode.AI_AUTO, CaptureMode.AUTO, CaptureMode.PRO -> captureSingle(outputFormat)
             CaptureMode.HDR -> captureHdr(hdrFrames, outputFormat)
             CaptureMode.NIGHT -> captureNight(nightFrames, outputFormat)
         }

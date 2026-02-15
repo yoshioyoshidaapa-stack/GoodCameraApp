@@ -42,6 +42,7 @@ fun ReviewScreen(
     onBack: () -> Unit,
     onSave: (Bitmap) -> Unit,
     autoContrastEnabled: Boolean = true,
+    aiProcessingConfig: ImageProcessor.ProcessingConfig? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -53,15 +54,16 @@ fun ReviewScreen(
     var showOriginal by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
 
-    // 処理設定
-    var autoWbEnabled by remember { mutableStateOf(true) }
-    var denoiseEnabled by remember { mutableStateOf(true) }
-    var denoiseStrength by remember { mutableStateOf(ImageProcessor.DenoiseStrength.MEDIUM) }
-    var deblurEnabled by remember { mutableStateOf(true) }
-    var perceptualEnabled by remember { mutableStateOf(true) }
-    var sharpenEnabled by remember { mutableStateOf(true) }
-    var sharpenAmount by remember { mutableFloatStateOf(1.2f) }
-    var autoLevelsEnabled by remember { mutableStateOf(autoContrastEnabled) }
+    // AIモードの場合、AIが推奨した設定で初期化
+    val aiConfig = aiProcessingConfig
+    var autoWbEnabled by remember { mutableStateOf(aiConfig?.autoWbEnabled ?: true) }
+    var denoiseEnabled by remember { mutableStateOf(aiConfig?.denoiseEnabled ?: true) }
+    var denoiseStrength by remember { mutableStateOf(aiConfig?.denoiseStrength ?: ImageProcessor.DenoiseStrength.MEDIUM) }
+    var deblurEnabled by remember { mutableStateOf(aiConfig?.deblurEnabled ?: true) }
+    var perceptualEnabled by remember { mutableStateOf(aiConfig?.perceptualEnabled ?: true) }
+    var sharpenEnabled by remember { mutableStateOf(aiConfig?.sharpenEnabled ?: true) }
+    var sharpenAmount by remember { mutableFloatStateOf(aiConfig?.sharpenAmount ?: 1.2f) }
+    var autoLevelsEnabled by remember { mutableStateOf(aiConfig?.autoLevelsEnabled ?: autoContrastEnabled) }
 
     // 画像をロード
     LaunchedEffect(imagePath) {

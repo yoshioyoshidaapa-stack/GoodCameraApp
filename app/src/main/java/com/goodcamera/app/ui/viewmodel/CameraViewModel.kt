@@ -2,16 +2,21 @@ package com.goodcamera.app.ui.viewmodel
 
 import android.graphics.Bitmap
 import android.view.Surface
+import android.view.TextureView
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.goodcamera.app.camera.*
+import com.goodcamera.app.processing.SceneDetector
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class CameraViewModel : ViewModel() {
 
@@ -22,6 +27,14 @@ class CameraViewModel : ViewModel() {
         private set
 
     private var timerJob: Job? = null
+    private var aiAnalysisJob: Job? = null
+
+    // AI解析結果を保持（撮影時の後処理設定に使用）
+    var lastSceneRecommendation: SceneDetector.SceneRecommendation? = null
+        private set
+
+    // プレビューフレーム取得用のTextureView参照
+    var previewTextureView: TextureView? = null
 
     fun initController(controller: CameraController) {
         cameraController = controller
@@ -51,6 +64,10 @@ class CameraViewModel : ViewModel() {
     fun openCamera(useFront: Boolean, surface: Surface) {
         _uiState.update { it.copy(usingFrontCamera = useFront, isPreviewActive = true) }
         cameraController?.openCamera(useFront, surface)
+        // AIモードならシーン解析を開始
+        if (_uiState.value.captureMode == CaptureMode.AI_AUTO) {
+            startAiAnalysis()
+        }
     }
 
     fun switchCamera(surface: Surface) {
@@ -62,6 +79,7 @@ class CameraViewModel : ViewModel() {
     fun setCaptureMode(mode: CaptureMode) {
         _uiState.update { state ->
             val newSettings = when (mode) {
+                CaptureMode.AI_AUTO -> state.settings.copy(autoExposure = true, autoFocus = true)
                 CaptureMode.AUTO -> state.settings.copy(autoExposure = true, autoFocus = true)
                 CaptureMode.PRO -> state.settings
                 CaptureMode.HDR -> state.settings.copy(autoExposure = true, autoFocus = true)
@@ -70,6 +88,12 @@ class CameraViewModel : ViewModel() {
             state.copy(captureMode = mode, settings = newSettings)
         }
         applySettings()
+
+        if (mode == CaptureMode.AI_AUTO) {
+            startAiAnalysis()
+        } else {
+            stopAiAnalysis()
+        }
     }
 
     fun setOutputFormat(format: OutputFormat) {
@@ -157,12 +181,84 @@ class CameraViewModel : ViewModel() {
     private fun doCapture() {
         val state = _uiState.value
         _uiState.update { it.copy(isCaptureInProgress = true) }
-        cameraController?.capturePhoto(
-            mode = state.captureMode,
-            outputFormat = state.outputFormat,
-            hdrFrames = state.hdrFrameCount,
-            nightFrames = state.nightFrameCount,
-        )
+
+        // AIモード: シーン解析結果に基づいて撮影モードを自動選択
+        val recommendation = lastSceneRecommendation
+        if (state.captureMode == CaptureMode.AI_AUTO && recommendation != null) {
+            val effectiveMode = when {
+                recommendation.useNightMode -> CaptureMode.NIGHT
+                recommendation.useHdr -> CaptureMode.HDR
+                else -> CaptureMode.AUTO
+            }
+            // AI推奨の露出補正を適用
+            if (recommendation.exposureCompensation != 0) {
+                cameraController?.updateSettings(
+                    state.settings.copy(exposureCompensation = recommendation.exposureCompensation)
+                )
+            }
+            cameraController?.capturePhoto(
+                mode = effectiveMode,
+                outputFormat = state.outputFormat,
+                hdrFrames = state.hdrFrameCount,
+                nightFrames = state.nightFrameCount,
+            )
+        } else {
+            cameraController?.capturePhoto(
+                mode = state.captureMode,
+                outputFormat = state.outputFormat,
+                hdrFrames = state.hdrFrameCount,
+                nightFrames = state.nightFrameCount,
+            )
+        }
+    }
+
+    // ---- AI シーン解析 ----
+
+    private fun startAiAnalysis() {
+        stopAiAnalysis()
+        aiAnalysisJob = viewModelScope.launch {
+            _uiState.update { it.copy(aiAnalyzing = true) }
+            while (isActive) {
+                analyzeCurrentScene()
+                delay(1500) // 1.5秒ごとに解析
+            }
+        }
+    }
+
+    private fun stopAiAnalysis() {
+        aiAnalysisJob?.cancel()
+        aiAnalysisJob = null
+        _uiState.update { it.copy(aiAnalyzing = false, aiDetectedScene = "", aiConfidence = 0f) }
+        lastSceneRecommendation = null
+    }
+
+    private suspend fun analyzeCurrentScene() {
+        val tv = previewTextureView ?: return
+        val bitmap = withContext(Dispatchers.Main) {
+            tv.bitmap
+        } ?: return
+
+        try {
+            val analysis = withContext(Dispatchers.Default) {
+                SceneDetector.analyze(bitmap)
+            }
+
+            val recommendation = SceneDetector.recommendSettings(analysis)
+            lastSceneRecommendation = recommendation
+
+            _uiState.update {
+                it.copy(
+                    aiDetectedScene = analysis.sceneType.label,
+                    aiConfidence = analysis.confidence,
+                    // AIが推奨する露出補正を自動適用
+                    settings = it.settings.copy(
+                        exposureCompensation = recommendation.exposureCompensation,
+                    ),
+                )
+            }
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     // ---- グリッド ----
@@ -215,6 +311,7 @@ class CameraViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
+        aiAnalysisJob?.cancel()
         cameraController?.release()
     }
 }

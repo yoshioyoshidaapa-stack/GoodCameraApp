@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.goodcamera.app.camera.AppScreen
 import com.goodcamera.app.ui.screens.CameraScreen
@@ -33,13 +34,23 @@ import com.google.accompanist.permissions.shouldShowRationale
 
 class MainActivity : ComponentActivity() {
 
+    private var isReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // SplashScreen API: setContentView/super.onCreate より前に呼ぶ
+        val splashScreen = installSplashScreen()
+
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // プレビューが準備完了するまでスプラッシュを維持
+        splashScreen.setKeepOnScreenCondition { !isReady }
+
         setContent {
             GoodCameraTheme {
-                CameraAppContent()
+                CameraAppContent(
+                    onPreviewReady = { isReady = true },
+                )
             }
         }
     }
@@ -47,12 +58,19 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-private fun CameraAppContent() {
+private fun CameraAppContent(
+    onPreviewReady: () -> Unit = {},
+) {
     val cameraPermissionState = rememberPermissionState(android.Manifest.permission.CAMERA)
 
     if (cameraPermissionState.status.isGranted) {
         val viewModel: CameraViewModel = viewModel()
         val uiState by viewModel.uiState.collectAsState()
+
+        // プレビューが開始されたらスプラッシュを消す
+        if (uiState.isPreviewActive) {
+            onPreviewReady()
+        }
 
         when (uiState.currentScreen) {
             AppScreen.CAMERA -> {
@@ -76,6 +94,8 @@ private fun CameraAppContent() {
             }
         }
     } else {
+        // パーミッション未許可の場合はスプラッシュをすぐ消す
+        onPreviewReady()
         PermissionRequestScreen(
             shouldShowRationale = cameraPermissionState.status.shouldShowRationale,
             onRequestPermission = { cameraPermissionState.launchPermissionRequest() },

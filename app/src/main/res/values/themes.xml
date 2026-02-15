@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- スプラッシュテーマ: 起動直後から黒背景で白フラッシュを防止 -->
+    <style name="Theme.GoodCameraApp.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.GoodCameraApp</item>
+    </style>
+
+    <!-- メインテーマ -->
     <style name="Theme.GoodCameraApp" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/black</item>
         <item name="android:navigationBarColor">@android:color/black</item>
         <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@android:color/black</item>
     </style>
 </resources>

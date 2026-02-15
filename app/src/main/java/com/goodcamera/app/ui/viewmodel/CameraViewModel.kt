@@ -78,9 +78,9 @@ class CameraViewModel : ViewModel() {
     fun openCamera(useFront: Boolean, surface: Surface) {
         _uiState.update { it.copy(usingFrontCamera = useFront, isPreviewActive = true) }
         cameraController?.openCamera(useFront, surface)
-        // AIモードならシーン解析を開始
+        // AIモードならシーン解析を遅延起動（プレビュー安定後に開始）
         if (_uiState.value.captureMode == CaptureMode.AI_AUTO) {
-            startAiAnalysis()
+            startAiAnalysisDeferred()
         }
     }
 
@@ -118,6 +118,10 @@ class CameraViewModel : ViewModel() {
 
     fun setOutputFormat(format: OutputFormat) {
         _uiState.update { it.copy(outputFormat = format) }
+        // RAW+JPEG選択時にRAW ImageReaderを遅延初期化
+        if (format == OutputFormat.RAW_DNG) {
+            cameraController?.ensureRawSessionIfNeeded()
+        }
     }
 
     fun setIso(iso: Int) {
@@ -253,13 +257,31 @@ class CameraViewModel : ViewModel() {
 
     // ---- AI シーン解析 ----
 
+    /**
+     * カメラ起動直後にAI解析を遅延起動する。
+     * プレビューが安定するまで500ms待機してから解析ループを開始。
+     * 起動時のCPU負荷を軽減し、カメラプレビューの表示を優先する。
+     */
+    private fun startAiAnalysisDeferred() {
+        stopAiAnalysis()
+        aiAnalysisJob = viewModelScope.launch {
+            // プレビュー安定まで待機（起動時のカメラパイプライン初期化と競合回避）
+            delay(500)
+            _uiState.update { it.copy(aiAnalyzing = true) }
+            while (isActive) {
+                analyzeCurrentScene()
+                delay(1500)
+            }
+        }
+    }
+
     private fun startAiAnalysis() {
         stopAiAnalysis()
         aiAnalysisJob = viewModelScope.launch {
             _uiState.update { it.copy(aiAnalyzing = true) }
             while (isActive) {
                 analyzeCurrentScene()
-                delay(1500) // 1.5秒ごとに解析
+                delay(1500)
             }
         }
     }

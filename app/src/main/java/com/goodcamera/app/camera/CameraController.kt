@@ -63,7 +63,9 @@ class CameraController(private val context: Context) {
             return
         }
         currentCameraId = cameraId
-        queryCapabilities(cameraId)
+
+        // Capabilities をバックグラウンドで取得（openCamera をブロックしない）
+        cameraHandler.post { queryCapabilities(cameraId) }
 
         try {
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
@@ -146,26 +148,26 @@ class CameraController(private val context: Context) {
 
     // ---- Internal: Preview ----
 
+    /**
+     * プレビューセッションを構築する。
+     * 起動高速化のため、RAW ImageReader は遅延初期化（RAW+JPEG選択時に初めて作成）。
+     * サーフェス数が少ないほどセッション構築が速い。
+     */
     private fun createPreviewSession(surface: Surface) {
         val device = cameraDevice ?: return
         val captureSize = getOptimalCaptureSize()
 
-        imageReader = ImageReader.newInstance(
-            captureSize.width, captureSize.height, ImageFormat.JPEG, 2
-        )
-
-        val surfaces = mutableListOf(surface, imageReader!!.surface)
-
-        // Check for RAW support
-        val cameraId = currentCameraId ?: return
-        val chars = cameraManager.getCameraCharacteristics(cameraId)
-        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val rawSizes = map?.getOutputSizes(ImageFormat.RAW_SENSOR)
-        if (rawSizes != null && rawSizes.isNotEmpty()) {
-            val rawSize = rawSizes.maxByOrNull { it.width * it.height }!!
-            rawImageReader = ImageReader.newInstance(
-                rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2
+        // JPEG用ImageReaderは既存があれば再利用
+        if (imageReader == null) {
+            imageReader = ImageReader.newInstance(
+                captureSize.width, captureSize.height, ImageFormat.JPEG, 2
             )
+        }
+
+        // 起動高速化: RAW ImageReaderは初回セッションでは追加しない。
+        // RAW+JPEG形式を選択した時に初めてセッション再構築でRAWを追加する。
+        val surfaces = mutableListOf(surface, imageReader!!.surface)
+        if (rawImageReader != null) {
             surfaces.add(rawImageReader!!.surface)
         }
 
@@ -204,6 +206,26 @@ class CameraController(private val context: Context) {
             }
         } catch (e: CameraAccessException) {
             onError?.invoke("Camera access error: ${e.message}")
+        }
+    }
+
+    /**
+     * RAW+JPEG撮影時に必要なRAW ImageReaderを遅延初期化し、セッションを再構築する。
+     */
+    fun ensureRawSessionIfNeeded() {
+        if (rawImageReader != null) return
+        val cameraId = currentCameraId ?: return
+        val chars = cameraManager.getCameraCharacteristics(cameraId)
+        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val rawSizes = map?.getOutputSizes(ImageFormat.RAW_SENSOR)
+        if (rawSizes != null && rawSizes.isNotEmpty()) {
+            val rawSize = rawSizes.maxByOrNull { it.width * it.height }!!
+            rawImageReader = ImageReader.newInstance(
+                rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2
+            )
+            // RAWサーフェス追加のためセッション再構築
+            val surface = previewSurface ?: return
+            createPreviewSession(surface)
         }
     }
 

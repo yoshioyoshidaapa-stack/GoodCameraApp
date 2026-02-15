@@ -37,17 +37,25 @@ object NoiseReduction {
         val result = IntArray(width * height)
 
         // 空間重みのルックアップテーブルを事前計算
-        val spatialWeights = FloatArray((2 * radius + 1) * (2 * radius + 1))
+        val kernelWidth = 2 * radius + 1
+        val spatialWeights = FloatArray(kernelWidth * kernelWidth)
         val spatialDenom = 2f * sigmaSpace * sigmaSpace
         for (dy in -radius..radius) {
             for (dx in -radius..radius) {
                 val dist = (dx * dx + dy * dy).toFloat()
-                spatialWeights[(dy + radius) * (2 * radius + 1) + (dx + radius)] =
+                spatialWeights[(dy + radius) * kernelWidth + (dx + radius)] =
                     exp(-dist / spatialDenom)
             }
         }
 
+        // 色差重みのLUT: colorDist の最大値は 3*255^2 = 195075
+        // 実際にはsigmaColor=40でも dist>3000 程度で重みが≒0になるので切り詰め可能
         val colorDenom = 2f * sigmaColor * sigmaColor
+        val maxColorDist = (6f * sigmaColor * sigmaColor).toInt().coerceAtMost(195075)
+        val colorWeightLut = FloatArray(maxColorDist + 1)
+        for (d in 0..maxColorDist) {
+            colorWeightLut[d] = exp(-d.toFloat() / colorDenom)
+        }
 
         for (y in 0 until height) {
             for (x in 0 until width) {
@@ -73,14 +81,18 @@ object NoiseReduction {
                         val nG = (pixels[nIdx] shr 8) and 0xFF
                         val nB = pixels[nIdx] and 0xFF
 
-                        // 色差
-                        val colorDist = ((cR - nR) * (cR - nR) +
+                        // 色差（LUT参照 — exp()呼び出しを排除）
+                        val colorDist = (cR - nR) * (cR - nR) +
                                 (cG - nG) * (cG - nG) +
-                                (cB - nB) * (cB - nB)).toFloat()
-                        val colorWeight = exp(-colorDist / colorDenom)
+                                (cB - nB) * (cB - nB)
+                        val colorWeight = if (colorDist <= maxColorDist) {
+                            colorWeightLut[colorDist]
+                        } else {
+                            0f // 色差が大きすぎる → 重みゼロ（エッジ保護）
+                        }
 
                         val spatialWeight =
-                            spatialWeights[(dy + radius) * (2 * radius + 1) + (dx + radius)]
+                            spatialWeights[(dy + radius) * kernelWidth + (dx + radius)]
                         val weight = spatialWeight * colorWeight
 
                         sumR += nR * weight

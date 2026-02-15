@@ -58,6 +58,7 @@ object DehazeFilter {
     /**
      * ダークチャネルを計算
      * 各パッチ内のR,G,Bの最小値の最小値
+     * minChannel配列を再利用して水平パスを上書きし、メモリ使用量を削減
      */
     private fun computeDarkChannel(
         pixels: IntArray,
@@ -66,51 +67,52 @@ object DehazeFilter {
         patchSize: Int,
     ): IntArray {
         val halfPatch = patchSize / 2
-        val darkChannel = IntArray(width * height)
+        val size = width * height
 
-        // まず各ピクセルのRGB最小値を計算
-        val minChannel = IntArray(width * height)
+        // 各ピクセルのRGB最小値を計算（この配列を水平パス結果で上書きし再利用）
+        val buffer = IntArray(size)
         for (i in pixels.indices) {
             val r = (pixels[i] shr 16) and 0xFF
             val g = (pixels[i] shr 8) and 0xFF
             val b = pixels[i] and 0xFF
-            minChannel[i] = min(r, min(g, b))
+            buffer[i] = min(r, min(g, b))
         }
 
-        // パッチ内の最小値（ミニマムフィルタ）を2パス高速計算
-        // 水平パス
-        val horizontalMin = IntArray(width * height)
+        // 水平パス（bufferを上書き）
+        val darkChannel = IntArray(size)
         for (y in 0 until height) {
+            val rowOffset = y * width
             for (x in 0 until width) {
                 var minVal = 255
                 val xStart = max(0, x - halfPatch)
                 val xEnd = min(width - 1, x + halfPatch)
                 for (xx in xStart..xEnd) {
-                    minVal = min(minVal, minChannel[y * width + xx])
+                    minVal = min(minVal, buffer[rowOffset + xx])
                 }
-                horizontalMin[y * width + x] = minVal
+                darkChannel[rowOffset + x] = minVal
             }
         }
 
-        // 垂直パス
-        for (y in 0 until height) {
-            for (x in 0 until width) {
+        // 垂直パス（darkChannelを上書き）
+        for (x in 0 until width) {
+            for (y in 0 until height) {
                 var minVal = 255
                 val yStart = max(0, y - halfPatch)
                 val yEnd = min(height - 1, y + halfPatch)
                 for (yy in yStart..yEnd) {
-                    minVal = min(minVal, horizontalMin[yy * width + x])
+                    minVal = min(minVal, darkChannel[yy * width + x])
                 }
-                darkChannel[y * width + x] = minVal
+                buffer[y * width + x] = minVal
             }
         }
 
-        return darkChannel
+        return buffer
     }
 
     /**
      * 大気光を推定
      * ダークチャネルの上位0.1%のピクセルから最も明るいものを選ぶ
+     * ヒストグラムベースでしきい値を O(n) で求める（ソート不要）
      */
     private fun estimateAtmosphericLight(
         pixels: IntArray,
@@ -121,11 +123,18 @@ object DehazeFilter {
         val numPixels = width * height
         val topCount = max(numPixels / 1000, 1) // 上位 0.1%
 
-        // ダークチャネル値でソートしたインデックスを取得（上位のみ）
-        // 高速化: 全ソートの代わりにしきい値を求める
-        val sorted = darkChannel.copyOf()
-        sorted.sort()
-        val threshold = sorted[numPixels - topCount]
+        // ダークチャネルのヒストグラム（0-255）でしきい値を求める
+        val hist = IntArray(256)
+        for (i in 0 until numPixels) {
+            hist[darkChannel[i]]++
+        }
+        var cumulative = 0
+        var threshold = 255
+        while (threshold > 0 && cumulative < topCount) {
+            cumulative += hist[threshold]
+            threshold--
+        }
+        threshold++ // 上位topCount個を含む最小しきい値
 
         var bestIdx = 0
         var bestBrightness = 0
@@ -162,51 +171,49 @@ object DehazeFilter {
         strength: Float,
     ): FloatArray {
         val halfPatch = patchSize / 2
-        val aR = max(atmosphericLight[0], 1)
-        val aG = max(atmosphericLight[1], 1)
-        val aB = max(atmosphericLight[2], 1)
+        val invAR = 1f / max(atmosphericLight[0], 1)
+        val invAG = 1f / max(atmosphericLight[1], 1)
+        val invAB = 1f / max(atmosphericLight[2], 1)
+        val size = width * height
 
-        // 各ピクセルのRGB / A の最小値
-        val normalizedMin = FloatArray(width * height)
+        // 各ピクセルの正規化最小値を計算（このバッファを水平パスで再利用）
+        val buffer = FloatArray(size)
         for (i in pixels.indices) {
-            val r = ((pixels[i] shr 16) and 0xFF).toFloat() / aR
-            val g = ((pixels[i] shr 8) and 0xFF).toFloat() / aG
-            val b = (pixels[i] and 0xFF).toFloat() / aB
-            normalizedMin[i] = min(r, min(g, b))
+            val r = ((pixels[i] shr 16) and 0xFF) * invAR
+            val g = ((pixels[i] shr 8) and 0xFF) * invAG
+            val b = (pixels[i] and 0xFF) * invAB
+            buffer[i] = min(r, min(g, b))
         }
 
-        // パッチ内最小値
-        val transmission = FloatArray(width * height)
-
         // 水平パス
-        val horizMin = FloatArray(width * height)
+        val transmission = FloatArray(size)
         for (y in 0 until height) {
+            val rowOffset = y * width
             for (x in 0 until width) {
                 var minVal = 1f
                 val xStart = max(0, x - halfPatch)
                 val xEnd = min(width - 1, x + halfPatch)
                 for (xx in xStart..xEnd) {
-                    minVal = min(minVal, normalizedMin[y * width + xx])
+                    minVal = min(minVal, buffer[rowOffset + xx])
                 }
-                horizMin[y * width + x] = minVal
+                transmission[rowOffset + x] = minVal
             }
         }
 
-        // 垂直パス + 透過率計算
-        for (y in 0 until height) {
-            for (x in 0 until width) {
+        // 垂直パス + 透過率計算（bufferを結果に再利用）
+        for (x in 0 until width) {
+            for (y in 0 until height) {
                 var minVal = 1f
                 val yStart = max(0, y - halfPatch)
                 val yEnd = min(height - 1, y + halfPatch)
                 for (yy in yStart..yEnd) {
-                    minVal = min(minVal, horizMin[yy * width + x])
+                    minVal = min(minVal, transmission[yy * width + x])
                 }
-                // t(x) = 1 - strength * darkChannel_normalized
-                transmission[y * width + x] = 1f - strength * minVal
+                buffer[y * width + x] = 1f - strength * minVal
             }
         }
 
-        return transmission
+        return buffer
     }
 
     /**

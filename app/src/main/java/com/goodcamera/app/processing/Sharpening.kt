@@ -28,8 +28,8 @@ object Sharpening {
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        // Step 1: ガウシアンブラーで「ぼかし版」を作成
-        val blurred = gaussianBlur(pixels, width, height, radius)
+        // Step 1: ボックスブラーで「ぼかし版」を作成
+        val blurred = FilterUtils.boxBlur2Pass(pixels, width, height, radius)
 
         // Step 2: 差分を増幅してエッジ強調
         val result = IntArray(width * height)
@@ -65,64 +65,5 @@ object Sharpening {
         val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         output.setPixels(result, 0, width, 0, 0, width, height)
         return output
-    }
-
-    /**
-     * 簡易ガウシアンブラー（ボックスブラー2パスで近似）
-     */
-    private fun gaussianBlur(pixels: IntArray, width: Int, height: Int, radius: Int): IntArray {
-        val temp = IntArray(width * height)
-        val result = IntArray(width * height)
-        val kernelSize = 2 * radius + 1
-
-        // 水平パス
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                var sumR = 0
-                var sumG = 0
-                var sumB = 0
-                var count = 0
-
-                for (dx in -radius..radius) {
-                    val nx = (x + dx).coerceIn(0, width - 1)
-                    val idx = y * width + nx
-                    sumR += (pixels[idx] shr 16) and 0xFF
-                    sumG += (pixels[idx] shr 8) and 0xFF
-                    sumB += pixels[idx] and 0xFF
-                    count++
-                }
-
-                val r = sumR / count
-                val g = sumG / count
-                val b = sumB / count
-                temp[y * width + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
-        }
-
-        // 垂直パス
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                var sumR = 0
-                var sumG = 0
-                var sumB = 0
-                var count = 0
-
-                for (dy in -radius..radius) {
-                    val ny = (y + dy).coerceIn(0, height - 1)
-                    val idx = ny * width + x
-                    sumR += (temp[idx] shr 16) and 0xFF
-                    sumG += (temp[idx] shr 8) and 0xFF
-                    sumB += temp[idx] and 0xFF
-                    count++
-                }
-
-                val r = sumR / count
-                val g = sumG / count
-                val b = sumB / count
-                result[y * width + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
-        }
-
-        return result
     }
 }

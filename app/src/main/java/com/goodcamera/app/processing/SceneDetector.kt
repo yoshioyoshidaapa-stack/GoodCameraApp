@@ -60,20 +60,19 @@ object SceneDetector {
         small.getPixels(pixels, 0, w, 0, 0, w, h)
         if (small !== bitmap) small.recycle()
 
-        // 特徴量を計算
-        val brightness = analyzeBrightness(pixels)
-        val dynamicRange = analyzeDynamicRange(pixels)
-        val edgeDensity = analyzeEdgeDensity(pixels, w, h)
-        val skinRatio = analyzeSkinTones(pixels)
-        val greenRatio = analyzeGreenRatio(pixels)
-        val warmRatio = analyzeWarmRatio(pixels)
-        val blueRatio = analyzeBlueRatio(pixels)
-        val saturation = analyzeAverageSaturation(pixels)
+        // 全特徴量を1パスで計算
+        val features = analyzeAllFeatures(pixels, w, h)
+        val brightness = features.brightness
+        val dynamicRange = features.dynamicRange
+        val edgeDensity = features.edgeDensity
+        val skinRatio = features.skinRatio
+        val greenRatio = features.greenRatio
+        val warmRatio = features.warmRatio
+        val blueRatio = features.blueRatio
+        val saturation = features.saturation
+        val hazeLevel = features.hazeLevel
         val isLowLight = brightness < 50f
         val isHighContrast = dynamicRange > 180f
-
-        // かすみ度推定: ダークチャネルの平均値（高いほどかすみが強い）
-        val hazeLevel = estimateHazeFromPixels(pixels)
 
         // シーン推定（各シーンのスコアを計算し、最高スコアを採用）
         val scores = mutableMapOf<SceneType, Float>()
@@ -279,123 +278,100 @@ object SceneDetector {
 
     // ---- 特徴量計算 ----
 
-    private fun analyzeBrightness(pixels: IntArray): Float {
-        var sum = 0L
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            sum += (0.299f * r + 0.587f * g + 0.114f * b).toLong()
-        }
-        return sum.toFloat() / pixels.size
-    }
+    /**
+     * 全特徴量を1パスで計算する統合メソッド
+     * 旧実装では8回ピクセル配列を走査していたが、1回で全て計算する
+     */
+    private data class FeatureSet(
+        val brightness: Float,
+        val dynamicRange: Float,
+        val edgeDensity: Float,
+        val skinRatio: Float,
+        val greenRatio: Float,
+        val blueRatio: Float,
+        val warmRatio: Float,
+        val saturation: Float,
+        val hazeLevel: Float,
+    )
 
-    private fun analyzeDynamicRange(pixels: IntArray): Float {
+    private fun analyzeAllFeatures(pixels: IntArray, w: Int, h: Int): FeatureSet {
+        val n = pixels.size
+        var lumSum = 0L
         var minL = 255
         var maxL = 0
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            val l = (0.299f * r + 0.587f * g + 0.114f * b).toInt()
+        var skinCount = 0
+        var greenCount = 0
+        var blueCount = 0
+        var warmCount = 0
+        var sumSat = 0f
+        var darkSum = 0L
+
+        // 輝度キャッシュ（エッジ密度計算で再利用）
+        val lum = IntArray(n)
+
+        for (i in pixels.indices) {
+            val r = (pixels[i] shr 16) and 0xFF
+            val g = (pixels[i] shr 8) and 0xFF
+            val b = pixels[i] and 0xFF
+
+            // 輝度（整数近似: 77*R + 150*G + 29*B >> 8 ≒ 0.299R+0.587G+0.114B）
+            val l = (77 * r + 150 * g + 29 * b) shr 8
+            lum[i] = l
+
+            lumSum += l
             if (l < minL) minL = l
             if (l > maxL) maxL = l
+
+            // 肌色
+            if (r > g && g > b && r >= 60 && g >= 40) {
+                val rgDiff = r - g
+                val rbDiff = r - b
+                if (rgDiff in 10..80 && rbDiff in 20..120 && r > 80) skinCount++
+            }
+
+            // 緑
+            if (g > r + 10 && g > b + 10 && g > 60) greenCount++
+
+            // 青
+            if (b > r + 15 && b > g + 5 && b > 80) blueCount++
+
+            // 暖色
+            if (r > b + 30 && r > 80 && g > 40) warmCount++
+
+            // 彩度
+            val chMax = maxOf(r, g, b)
+            val chMin = minOf(r, g, b)
+            if (chMax > 0) sumSat += (chMax - chMin).toFloat() / chMax * 100f
+
+            // ダークチャネル
+            darkSum += chMin
         }
-        return (maxL - minL).toFloat()
-    }
 
-    private fun analyzeEdgeDensity(pixels: IntArray, w: Int, h: Int): Float {
+        // エッジ密度（事前計算した輝度配列を使用）
         var edgeCount = 0
-        val threshold = 30
-
+        val edgeThreshold = 30
         for (y in 1 until h - 1) {
             for (x in 1 until w - 1) {
                 val idx = y * w + x
-                val c = luminance(pixels[idx])
-                val r = luminance(pixels[idx + 1])
-                val d = luminance(pixels[idx + w])
-                if (abs(c - r) > threshold || abs(c - d) > threshold) {
+                val c = lum[idx]
+                if (abs(c - lum[idx + 1]) > edgeThreshold || abs(c - lum[idx + w]) > edgeThreshold) {
                     edgeCount++
                 }
             }
         }
-        return edgeCount.toFloat() / ((w - 2) * (h - 2))
-    }
+        val edgeArea = ((w - 2) * (h - 2)).coerceAtLeast(1)
 
-    private fun analyzeSkinTones(pixels: IntArray): Float {
-        var skinCount = 0
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            if (isSkinTone(r, g, b)) skinCount++
-        }
-        return skinCount.toFloat() / pixels.size
-    }
-
-    /**
-     * RGB空間での肌色判定
-     * 複数の肌色トーンに対応（明るい肌〜暗い肌）
-     */
-    private fun isSkinTone(r: Int, g: Int, b: Int): Boolean {
-        // 基本条件: R > G > B、かつ適度な明るさ
-        if (r <= g || g <= b) return false
-        if (r < 60 || g < 40) return false
-
-        val rgDiff = r - g
-        val rbDiff = r - b
-
-        // 肌色の典型的な特徴
-        return rgDiff in 10..80 && rbDiff in 20..120 && r > 80
-    }
-
-    private fun analyzeGreenRatio(pixels: IntArray): Float {
-        var greenCount = 0
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            // 緑優位: Gが最大で、RやBより十分大きい
-            if (g > r + 10 && g > b + 10 && g > 60) greenCount++
-        }
-        return greenCount.toFloat() / pixels.size
-    }
-
-    private fun analyzeBlueRatio(pixels: IntArray): Float {
-        var blueCount = 0
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            if (b > r + 15 && b > g + 5 && b > 80) blueCount++
-        }
-        return blueCount.toFloat() / pixels.size
-    }
-
-    private fun analyzeWarmRatio(pixels: IntArray): Float {
-        var warmCount = 0
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            // 暖色: R優位でBが少ない
-            if (r > b + 30 && r > 80 && g > 40) warmCount++
-        }
-        return warmCount.toFloat() / pixels.size
-    }
-
-    private fun analyzeAverageSaturation(pixels: IntArray): Float {
-        var sumSat = 0f
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            val max = maxOf(r, g, b)
-            val min = minOf(r, g, b)
-            val sat = if (max > 0) (max - min).toFloat() / max * 100f else 0f
-            sumSat += sat
-        }
-        return sumSat / pixels.size
+        return FeatureSet(
+            brightness = lumSum.toFloat() / n,
+            dynamicRange = (maxL - minL).toFloat(),
+            edgeDensity = edgeCount.toFloat() / edgeArea,
+            skinRatio = skinCount.toFloat() / n,
+            greenRatio = greenCount.toFloat() / n,
+            blueRatio = blueCount.toFloat() / n,
+            warmRatio = warmCount.toFloat() / n,
+            saturation = sumSat / n,
+            hazeLevel = (darkSum.toFloat() / n / 100f).coerceIn(0f, 1f),
+        )
     }
 
     /**
@@ -490,23 +466,6 @@ object SceneDetector {
         val r = (pixel shr 16) and 0xFF
         val g = (pixel shr 8) and 0xFF
         val b = pixel and 0xFF
-        return (0.299f * r + 0.587f * g + 0.114f * b).toInt()
-    }
-
-    /**
-     * かすみ度推定（ダークチャネルベース）
-     * 各ピクセルのRGB最小値の平均を計算。
-     * かすみが強いほどこの値が高くなる（白っぽいため暗チャネルが上昇）。
-     */
-    private fun estimateHazeFromPixels(pixels: IntArray): Float {
-        var darkSum = 0L
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            darkSum += minOf(r, g, b)
-        }
-        val avgDark = darkSum.toFloat() / pixels.size
-        return (avgDark / 100f).coerceIn(0f, 1f)
+        return (77 * r + 150 * g + 29 * b) shr 8
     }
 }

@@ -1,7 +1,6 @@
 package com.goodcamera.app.processing
 
 import android.graphics.Bitmap
-import kotlin.math.ln
 import kotlin.math.pow
 
 /**
@@ -11,6 +10,23 @@ import kotlin.math.pow
  * ハイダイナミックレンジ画像を生成する。
  */
 object HdrToneMapper {
+
+    // sRGBガンマ→リニア変換のLUT（256エントリ、毎ピクセルのpow()呼び出しを排除）
+    private val gammaToLinearLut = FloatArray(256) { i ->
+        val v = i / 255f
+        if (v <= 0.04045f) v / 12.92f else ((v + 0.055f) / 1.055f).pow(2.4f)
+    }
+
+    // リニア→sRGBガンマ変換のLUT（4096エントリで十分な精度）
+    private val linearToGammaLut = FloatArray(4096) { i ->
+        (i / 4095f).pow(1f / 2.2f)
+    }
+
+    // 三角重みLUT（256エントリ）
+    private val triangleWeightLut = FloatArray(256) { i ->
+        val v = i / 255f
+        if (v <= 0.5f) (v * 2f).coerceAtLeast(0.01f) else ((1f - v) * 2f).coerceAtLeast(0.01f)
+    }
 
     /**
      * 露出ブラケットフレームをHDR合成
@@ -48,21 +64,21 @@ object HdrToneMapper {
 
             // フレームの相対露出値（中央フレームを基準=1.0）
             val midIdx = frames.size / 2
-            val relativeExposure = 2f.pow(frameIdx - midIdx)
+            val invExposure = 1f / 2f.pow(frameIdx - midIdx)
 
             for (i in pixels.indices) {
-                val r = ((pixels[i] shr 16) and 0xFF) / 255f
-                val g = ((pixels[i] shr 8) and 0xFF) / 255f
-                val b = (pixels[i] and 0xFF) / 255f
+                val ri = (pixels[i] shr 16) and 0xFF
+                val gi = (pixels[i] shr 8) and 0xFF
+                val bi = pixels[i] and 0xFF
 
-                // 重み関数: 中間トーンを高重み、飽和・暗部は低重み
-                val luminance = 0.2126f * r + 0.7152f * g + 0.0722f * b
-                val weight = triangleWeight(luminance)
+                // 重み関数: LUTで参照（中間トーンを高重み）
+                val luminanceIdx = ((54 * ri + 183 * gi + 18 * bi) shr 8).coerceIn(0, 255)
+                val weight = triangleWeightLut[luminanceIdx]
 
-                // 逆ガンマ→リニア→HDR放射輝度に変換
-                val linearR = gammaToLinear(r) / relativeExposure
-                val linearG = gammaToLinear(g) / relativeExposure
-                val linearB = gammaToLinear(b) / relativeExposure
+                // LUTで逆ガンマ→リニア変換（毎ピクセルのpow()を排除）
+                val linearR = gammaToLinearLut[ri] * invExposure
+                val linearG = gammaToLinearLut[gi] * invExposure
+                val linearB = gammaToLinearLut[bi] * invExposure
 
                 hdrR[i] += linearR * weight
                 hdrG[i] += linearG * weight
@@ -79,38 +95,32 @@ object HdrToneMapper {
             hdrB[i] /= w
         }
 
-        // Reinhardトーンマッピング
-        val toneMapR = FloatArray(pixelCount)
-        val toneMapG = FloatArray(pixelCount)
-        val toneMapB = FloatArray(pixelCount)
-
-        // シーンの平均輝度（対数平均）を計算
+        // Reinhardトーンマッピング（hdr配列をインプレースで再利用）
         val logAvgLuminance = computeLogAverageLuminance(hdrR, hdrG, hdrB, pixelCount)
         val key = 0.18f / (logAvgLuminance + 0.001f)
 
         for (i in 0 until pixelCount) {
-            toneMapR[i] = reinhardToneMap(hdrR[i] * key)
-            toneMapG[i] = reinhardToneMap(hdrG[i] * key)
-            toneMapB[i] = reinhardToneMap(hdrB[i] * key)
+            val kr = hdrR[i] * key; hdrR[i] = kr / (1f + kr)
+            val kg = hdrG[i] * key; hdrG[i] = kg / (1f + kg)
+            val kb = hdrB[i] * key; hdrB[i] = kb / (1f + kb)
         }
 
         // 彩度調整 & ガンマ補正 → 8bit出力
         val result = IntArray(pixelCount)
-        val invGamma = 1f / gamma.coerceAtLeast(0.1f)
+        val lutSize = linearToGammaLut.size - 1
 
         for (i in 0 until pixelCount) {
-            val lum = 0.2126f * toneMapR[i] + 0.7152f * toneMapG[i] + 0.0722f * toneMapB[i]
-            val lumSafe = lum.coerceAtLeast(0.001f)
+            val tmR = hdrR[i]; val tmG = hdrG[i]; val tmB = hdrB[i]
+            val lum = 0.2126f * tmR + 0.7152f * tmG + 0.0722f * tmB
 
-            // 彩度調整
-            var r = lum + saturation * (toneMapR[i] - lum)
-            var g = lum + saturation * (toneMapG[i] - lum)
-            var b = lum + saturation * (toneMapB[i] - lum)
+            // 彩度調整 + ガンマ補正（LUT参照でpow()を排除）
+            var r = (lum + saturation * (tmR - lum)).coerceIn(0f, 1f)
+            var g = (lum + saturation * (tmG - lum)).coerceIn(0f, 1f)
+            var b = (lum + saturation * (tmB - lum)).coerceIn(0f, 1f)
 
-            // ガンマ補正
-            r = linearToGamma(r.coerceAtLeast(0f), invGamma)
-            g = linearToGamma(g.coerceAtLeast(0f), invGamma)
-            b = linearToGamma(b.coerceAtLeast(0f), invGamma)
+            r = linearToGammaLut[(r * lutSize).toInt().coerceIn(0, lutSize)]
+            g = linearToGammaLut[(g * lutSize).toInt().coerceIn(0, lutSize)]
+            b = linearToGammaLut[(b * lutSize).toInt().coerceIn(0, lutSize)]
 
             val iR = (r * 255f).toInt().coerceIn(0, 255)
             val iG = (g * 255f).toInt().coerceIn(0, 255)
@@ -121,20 +131,6 @@ object HdrToneMapper {
         val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         output.setPixels(result, 0, width, 0, 0, width, height)
         return output
-    }
-
-    /** Reinhard グローバルオペレータ: L_d = L / (1 + L) */
-    private fun reinhardToneMap(luminance: Float): Float {
-        return luminance / (1f + luminance)
-    }
-
-    /** 三角重み関数: 0.5付近で最大、0と1付近でゼロに近づく */
-    private fun triangleWeight(value: Float): Float {
-        return if (value <= 0.5f) {
-            (value * 2f).coerceAtLeast(0.01f)
-        } else {
-            ((1f - value) * 2f).coerceAtLeast(0.01f)
-        }
     }
 
     /** 対数平均輝度の計算 */
@@ -153,14 +149,4 @@ object HdrToneMapper {
         return kotlin.math.exp(logSum / count).toFloat()
     }
 
-    /** sRGBガンマ→リニア変換の近似 */
-    private fun gammaToLinear(value: Float): Float {
-        return if (value <= 0.04045f) value / 12.92f
-        else ((value + 0.055f) / 1.055f).pow(2.4f)
-    }
-
-    /** リニア→sRGBガンマ変換 */
-    private fun linearToGamma(value: Float, invGamma: Float = 1f / 2.2f): Float {
-        return value.pow(invGamma)
-    }
 }

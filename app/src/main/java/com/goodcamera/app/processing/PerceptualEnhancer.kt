@@ -1,9 +1,6 @@
 package com.goodcamera.app.processing
 
 import android.graphics.Bitmap
-import kotlin.math.ln
-import kotlin.math.pow
-import kotlin.math.sqrt
 
 /**
  * 人間の視覚系（HVS: Human Visual System）を模倣した知覚的画像補正
@@ -38,11 +35,8 @@ object PerceptualEnhancer {
         // Step 1: 局所コントラスト適応（CLAHE風）
         applyLocalContrastAdaptation(pixels, width, height)
 
-        // Step 2: 対数的輝度圧縮（Weber-Fechner）
-        applyPerceptualToneMap(pixels)
-
-        // Step 3: 中間トーン彩度ブースト（記憶色効果）
-        applyMemoryColorBoost(pixels)
+        // Step 2: 対数的輝度圧縮 + 中間トーン彩度ブースト（1パス統合）
+        applyPerceptualToneAndColorBoost(pixels)
 
         val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         output.setPixels(pixels, 0, width, 0, 0, width, height)
@@ -172,88 +166,52 @@ object PerceptualEnhancer {
     }
 
     /**
-     * 対数的輝度圧縮 (Weber-Fechner の法則)
+     * 対数的輝度圧縮 + 中間トーン彩度ブーストを1パスで適用
      *
-     * 人間の輝度知覚は線形ではなく対数的。暗い部分の小さな差は敏感に感じるが、
-     * 明るい部分の大きな差にはあまり気づかない。
-     * この特性を模倣し、シャドウを持ち上げハイライトを抑える。
+     * 旧実装では2パス（トーンマップ→カラーブースト）に分かれていたが、
+     * LUTの事前計算で統合可能。
+     *
+     * - Weber-Fechner: シャドウを持ち上げハイライトを抑える
+     * - 記憶色効果: 中間トーンのみ控えめに彩度を上げる
      */
-    private fun applyPerceptualToneMap(pixels: IntArray) {
-        // sRGBトランスファ関数に近い S字カーブを LUT で適用
-        // シャドウは少し持ち上げ、ハイライトは少し抑える
-        val lut = IntArray(256)
+    private fun applyPerceptualToneAndColorBoost(pixels: IntArray) {
+        // トーンマップLUT
+        val toneLut = IntArray(256)
         for (i in 0..255) {
             val x = i / 255f
-            // ソフトな S字: シャドウを +10%ほど持ち上げ、ハイライトを -5%抑える
-            val lifted = adjustShadowHighlight(x, shadowLift = 0.08f, highlightCompress = 0.03f)
-            lut[i] = (lifted * 255f).toInt().coerceIn(0, 255)
+            val shadow = 0.08f * (1f - x) * (1f - x)
+            val highlight = -0.03f * x * x
+            toneLut[i] = ((x + shadow + highlight).coerceIn(0f, 1f) * 255f).toInt()
         }
 
-        for (i in pixels.indices) {
-            val r = lut[(pixels[i] shr 16) and 0xFF]
-            val g = lut[(pixels[i] shr 8) and 0xFF]
-            val b = lut[pixels[i] and 0xFF]
-            pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        // 中間トーン重みLUT（exp()のDouble変換を排除）
+        val midWeightLut = FloatArray(256)
+        for (i in 0..255) {
+            val centered = i / 255f - 0.5f
+            midWeightLut[i] = kotlin.math.exp(-8f * centered * centered)
         }
-    }
 
-    /**
-     * シャドウ持ち上げ + ハイライト圧縮のトーンカーブ
-     * 3次ベジエ風の滑らかな S 字を生成
-     */
-    private fun adjustShadowHighlight(
-        x: Float,
-        shadowLift: Float,
-        highlightCompress: Float,
-    ): Float {
-        // シャドウ: x が小さいほど持ち上げ量が大きい
-        val shadow = shadowLift * (1f - x) * (1f - x)
-        // ハイライト: x が大きいほど圧縮量が大きい
-        val highlight = -highlightCompress * x * x
-        return (x + shadow + highlight).coerceIn(0f, 1f)
-    }
-
-    /**
-     * 中間トーン彩度ブースト (記憶色効果)
-     *
-     * 人は風景や肌の色を実際より鮮やかに記憶する。
-     * 中間輝度のピクセルのみ控えめに彩度を上げ、暗部と明部は自然なまま残す。
-     * また、肌色（暖色系）は過度に彩度を上げない。
-     */
-    private fun applyMemoryColorBoost(pixels: IntArray) {
-        val boostAmount = 0.15f // 最大 15% 彩度アップ
+        val boostAmount = 0.15f
 
         for (i in pixels.indices) {
-            val r = (pixels[i] shr 16) and 0xFF
-            val g = (pixels[i] shr 8) and 0xFF
-            val b = pixels[i] and 0xFF
+            // トーンマップ適用
+            val r = toneLut[(pixels[i] shr 16) and 0xFF]
+            val g = toneLut[(pixels[i] shr 8) and 0xFF]
+            val b = toneLut[pixels[i] and 0xFF]
 
+            // 彩度ブースト
             val lum = 0.299f * r + 0.587f * g + 0.114f * b
-
-            // 中間トーン重み: 128付近で最大、0/255で0
-            val midWeight = midtoneWeight(lum / 255f)
+            val midWeight = midWeightLut[lum.toInt().coerceIn(0, 255)]
 
             // 肌色検出: 暖色系は控えめに
-            val isSkinTone = r > g && g > b && r - b > 20 && lum in 60f..200f
-            val skinDamping = if (isSkinTone) 0.4f else 1f
-
+            val skinDamping = if (r > g && g > b && r - b > 20 && lum in 60f..200f) 0.4f else 1f
             val effectiveBoost = 1f + boostAmount * midWeight * skinDamping
 
-            // 輝度を保持しながら彩度をブースト
             val newR = (lum + (r - lum) * effectiveBoost).toInt().coerceIn(0, 255)
             val newG = (lum + (g - lum) * effectiveBoost).toInt().coerceIn(0, 255)
             val newB = (lum + (b - lum) * effectiveBoost).toInt().coerceIn(0, 255)
 
             pixels[i] = (0xFF shl 24) or (newR shl 16) or (newG shl 8) or newB
         }
-    }
-
-    /**
-     * 中間トーン重み関数: 0.5 付近で最大=1、端（0, 1）で0に近づく
-     * ガウシアン風のベル型カーブ
-     */
-    private fun midtoneWeight(x: Float): Float {
-        val centered = x - 0.5f
-        return kotlin.math.exp((-8f * centered * centered).toDouble()).toFloat()
     }
 }

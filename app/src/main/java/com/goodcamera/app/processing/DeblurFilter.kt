@@ -146,7 +146,7 @@ object DeblurFilter {
         height: Int,
         pass: DeblurPass,
     ): IntArray {
-        val blurred = boxBlur2Pass(pixels, width, height, pass.radius)
+        val blurred = FilterUtils.boxBlur2Pass(pixels, width, height, pass.radius)
         val result = IntArray(pixels.size)
 
         for (i in pixels.indices) {
@@ -188,51 +188,4 @@ object DeblurFilter {
         return result
     }
 
-    /**
-     * 2パスボックスブラー（ガウシアン近似）
-     */
-    private fun boxBlur2Pass(pixels: IntArray, width: Int, height: Int, radius: Int): IntArray {
-        val temp = IntArray(pixels.size)
-        val result = IntArray(pixels.size)
-
-        // 水平パス
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                var sumR = 0; var sumG = 0; var sumB = 0; var count = 0
-                for (dx in -radius..radius) {
-                    val nx = (x + dx).coerceIn(0, width - 1)
-                    val idx = y * width + nx
-                    sumR += (pixels[idx] shr 16) and 0xFF
-                    sumG += (pixels[idx] shr 8) and 0xFF
-                    sumB += pixels[idx] and 0xFF
-                    count++
-                }
-                temp[y * width + x] = (0xFF shl 24) or
-                        ((sumR / count) shl 16) or
-                        ((sumG / count) shl 8) or
-                        (sumB / count)
-            }
-        }
-
-        // 垂直パス
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                var sumR = 0; var sumG = 0; var sumB = 0; var count = 0
-                for (dy in -radius..radius) {
-                    val ny = (y + dy).coerceIn(0, height - 1)
-                    val idx = ny * width + x
-                    sumR += (temp[idx] shr 16) and 0xFF
-                    sumG += (temp[idx] shr 8) and 0xFF
-                    sumB += temp[idx] and 0xFF
-                    count++
-                }
-                result[y * width + x] = (0xFF shl 24) or
-                        ((sumR / count) shl 16) or
-                        ((sumG / count) shl 8) or
-                        (sumB / count)
-            }
-        }
-
-        return result
-    }
 }

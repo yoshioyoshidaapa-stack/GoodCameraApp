@@ -109,6 +109,7 @@ class CameraController(private val context: Context) {
             CaptureMode.AI_AUTO, CaptureMode.AUTO, CaptureMode.PRO -> captureSingle(outputFormat)
             CaptureMode.HDR -> captureHdr(hdrFrames, outputFormat)
             CaptureMode.NIGHT -> captureNight(nightFrames, outputFormat)
+            CaptureMode.BURST -> { /* Burst is handled by startBurst/stopBurst */ }
         }
     }
 
@@ -601,6 +602,200 @@ class CameraController(private val context: Context) {
             } catch (_: CameraAccessException) { }
         }
     }
+
+    // ---- Burst Capture ----
+
+    private var burstImageReader: ImageReader? = null
+    private var isBurstRunning = false
+    var onBurstFrame: ((String, Int) -> Unit)? = null
+    var onBurstFinished: ((List<String>) -> Unit)? = null
+    private val burstPaths = Collections.synchronizedList(mutableListOf<String>())
+    private var burstFrameCount = 0
+
+    /**
+     * 高速連写を開始する。
+     * setRepeatingRequest + TEMPLATE_STILL_CAPTURE で最大速度を実現。
+     * - AFは開始時に1回だけロック（フレームごとにAFしない）
+     * - NR/Edge/Shading を FAST モードで処理速度優先
+     * - 後処理なし: カメラHW JPEGをそのまま保存
+     * - ImageReaderバッファ8枚でドロップ防止
+     */
+    fun startBurst() {
+        val device = cameraDevice ?: return
+        val session = captureSession ?: return
+        val surface = previewSurface ?: return
+
+        if (isBurstRunning) return
+        isBurstRunning = true
+        burstPaths.clear()
+        burstFrameCount = 0
+
+        // 連写用ImageReader: バッファ8枚で高速書き込み対応
+        val captureSize = getOptimalCaptureSize()
+        burstImageReader?.close()
+        burstImageReader = ImageReader.newInstance(
+            captureSize.width, captureSize.height, ImageFormat.JPEG, 8
+        )
+
+        burstImageReader!!.setOnImageAvailableListener({ imgReader ->
+            val image = imgReader.acquireNextImage() ?: return@setOnImageAvailableListener
+            try {
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+
+                // 後処理なし: JPEGを直接保存（最速）
+                val path = saveToMediaStore(bytes, "BURST", "image/jpeg", ".jpg")
+                if (path != null) {
+                    burstPaths.add(path)
+                    burstFrameCount++
+                    onBurstFrame?.invoke(path, burstFrameCount)
+                }
+            } finally {
+                image.close()
+            }
+        }, cameraHandler)
+
+        // セッションに連写用サーフェスを追加するため再構築
+        val surfaces = mutableListOf(surface, burstImageReader!!.surface)
+        // 既存のimageReaderも維持
+        imageReader?.let { surfaces.add(it.surface) }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val outputConfigs = surfaces.map { OutputConfiguration(it) }
+                val sessionConfig = SessionConfiguration(
+                    SessionConfiguration.SESSION_REGULAR,
+                    outputConfigs,
+                    executor,
+                    object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(newSession: CameraCaptureSession) {
+                            captureSession = newSession
+                            startBurstRepeating(device, newSession, surface)
+                        }
+                        override fun onConfigureFailed(session: CameraCaptureSession) {
+                            isBurstRunning = false
+                            onError?.invoke("Burst session configuration failed")
+                        }
+                    }
+                )
+                device.createCaptureSession(sessionConfig)
+            } else {
+                @Suppress("DEPRECATION")
+                device.createCaptureSession(surfaces,
+                    object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(newSession: CameraCaptureSession) {
+                            captureSession = newSession
+                            startBurstRepeating(device, newSession, surface)
+                        }
+                        override fun onConfigureFailed(session: CameraCaptureSession) {
+                            isBurstRunning = false
+                            onError?.invoke("Burst session configuration failed")
+                        }
+                    }, cameraHandler)
+            }
+        } catch (e: CameraAccessException) {
+            isBurstRunning = false
+            onError?.invoke("Burst start error: ${e.message}")
+        }
+    }
+
+    /**
+     * setRepeatingRequest で連写ループを開始。
+     * TEMPLATE_STILL_CAPTUREだが速度優先設定。
+     */
+    private fun startBurstRepeating(device: CameraDevice, session: CameraCaptureSession, surface: Surface) {
+        val burstReader = burstImageReader ?: return
+
+        try {
+            val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                addTarget(burstReader.surface)
+                // プレビューも同時表示
+                addTarget(surface)
+
+                // AE ON: カメラHWに露出任せ（フレーム間の遅延削減）
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                set(CaptureRequest.CONTROL_AE_LOCK, true) // AEロック: 連写中の明滅防止
+
+                // AFロック: 最初のフォーカスを維持（フレームごとのAFスキップ）
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                afRegion?.let {
+                    set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it))
+                }
+
+                // FAST モード: 画質よりスピード優先
+                set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+                set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+                set(CaptureRequest.HOT_PIXEL_MODE, CaptureRequest.HOT_PIXEL_MODE_FAST)
+                set(CaptureRequest.SHADING_MODE, CaptureRequest.SHADING_MODE_FAST)
+
+                // JPEG品質を少し下げて書き込み高速化
+                set(CaptureRequest.JPEG_QUALITY, 90.toByte())
+
+                // ズーム維持
+                if (currentZoomLevel > 1f) {
+                    val cameraId = currentCameraId
+                    if (cameraId != null) {
+                        val chars = cameraManager.getCameraCharacteristics(cameraId)
+                        val sensorRect = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                        if (sensorRect != null) {
+                            val centerX = sensorRect.width() / 2
+                            val centerY = sensorRect.height() / 2
+                            val deltaX = (sensorRect.width() / (2f * currentZoomLevel)).toInt()
+                            val deltaY = (sensorRect.height() / (2f * currentZoomLevel)).toInt()
+                            set(CaptureRequest.SCALER_CROP_REGION, Rect(
+                                centerX - deltaX, centerY - deltaY,
+                                centerX + deltaX, centerY + deltaY,
+                            ))
+                        }
+                    }
+                }
+            }
+
+            // setRepeatingRequest: カメラHWが最速でフレームを出力
+            session.setRepeatingRequest(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureFailed(
+                    session: CameraCaptureSession,
+                    request: CaptureRequest,
+                    failure: CaptureFailure
+                ) {
+                    Log.w(TAG, "Burst frame failed: ${failure.reason}")
+                }
+            }, cameraHandler)
+        } catch (e: CameraAccessException) {
+            isBurstRunning = false
+            onError?.invoke("Burst repeating error: ${e.message}")
+        }
+    }
+
+    /**
+     * 連写を停止し、通常プレビューに復帰する。
+     */
+    fun stopBurst() {
+        if (!isBurstRunning) return
+        isBurstRunning = false
+
+        try {
+            captureSession?.stopRepeating()
+        } catch (_: CameraAccessException) { }
+
+        val paths = burstPaths.toList()
+        val count = burstFrameCount
+
+        // 連写用ImageReaderを解放
+        burstImageReader?.close()
+        burstImageReader = null
+
+        // 通常プレビューセッションを再構築
+        val surface = previewSurface
+        if (surface != null) {
+            createPreviewSession(surface)
+        }
+
+        onBurstFinished?.invoke(paths)
+    }
+
+    fun isBurstActive(): Boolean = isBurstRunning
 
     // ---- Tap to Focus ----
 

@@ -28,6 +28,7 @@ enum class CaptureMode(val label: String) {
     PRO("Pro"),
     HDR("HDR"),
     NIGHT("Night"),
+    BURST("Burst"),
 }
 
 enum class OutputFormat(val label: String) {
@@ -81,4 +82,8 @@ data class CameraUiState(
     val aiDetectedScene: String = "",
     val aiConfidence: Float = 0f,
     val aiAnalyzing: Boolean = false,
+    // Burst Mode
+    val isBurstActive: Boolean = false,
+    val burstCount: Int = 0,
+    val burstSavedPaths: List<String> = emptyList(),
 )

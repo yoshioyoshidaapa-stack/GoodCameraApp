@@ -59,6 +59,20 @@ class CameraViewModel : ViewModel() {
                 isCaptureInProgress = false,
             ) }
         }
+
+        // 連写コールバック
+        controller.onBurstFrame = { _, count ->
+            _uiState.update { it.copy(burstCount = count) }
+        }
+
+        controller.onBurstFinished = { paths ->
+            _uiState.update { it.copy(
+                isBurstActive = false,
+                burstCount = 0,
+                burstSavedPaths = paths,
+                isCaptureInProgress = false,
+            ) }
+        }
     }
 
     fun openCamera(useFront: Boolean, surface: Surface) {
@@ -77,6 +91,11 @@ class CameraViewModel : ViewModel() {
     }
 
     fun setCaptureMode(mode: CaptureMode) {
+        // 連写中にモード変更された場合は停止
+        if (_uiState.value.isBurstActive) {
+            stopBurst()
+        }
+
         _uiState.update { state ->
             val newSettings = when (mode) {
                 CaptureMode.AI_AUTO -> state.settings.copy(autoExposure = true, autoFocus = true)
@@ -84,6 +103,7 @@ class CameraViewModel : ViewModel() {
                 CaptureMode.PRO -> state.settings
                 CaptureMode.HDR -> state.settings.copy(autoExposure = true, autoFocus = true)
                 CaptureMode.NIGHT -> state.settings.copy(autoFocus = true)
+                CaptureMode.BURST -> state.settings.copy(autoExposure = true, autoFocus = true)
             }
             state.copy(captureMode = mode, settings = newSettings)
         }
@@ -212,6 +232,25 @@ class CameraViewModel : ViewModel() {
         }
     }
 
+    // ---- 連写 (Burst) ----
+
+    fun startBurst() {
+        if (_uiState.value.isBurstActive) return
+        _uiState.update { it.copy(
+            isBurstActive = true,
+            isCaptureInProgress = true,
+            burstCount = 0,
+            burstSavedPaths = emptyList(),
+        ) }
+        cameraController?.startBurst()
+    }
+
+    fun stopBurst() {
+        if (!_uiState.value.isBurstActive) return
+        cameraController?.stopBurst()
+        // state update は onBurstFinished コールバックで行う
+    }
+
     // ---- AI シーン解析 ----
 
     private fun startAiAnalysis() {
@@ -312,6 +351,9 @@ class CameraViewModel : ViewModel() {
         super.onCleared()
         timerJob?.cancel()
         aiAnalysisJob?.cancel()
+        if (_uiState.value.isBurstActive) {
+            cameraController?.stopBurst()
+        }
         cameraController?.release()
     }
 }

@@ -193,6 +193,54 @@ fun CameraScreen(
             }
         }
 
+        // 連写モード: 枚数カウンター
+        AnimatedVisibility(
+            visible = uiState.isBurstActive && uiState.burstCount > 0,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 56.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = Color.Red.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(20.dp),
+                    )
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // 点滅する録画インジケーター
+                    val dotAlpha = remember { Animatable(1f) }
+                    LaunchedEffect(uiState.isBurstActive) {
+                        if (uiState.isBurstActive) {
+                            while (true) {
+                                dotAlpha.animateTo(0.3f, tween(400))
+                                dotAlpha.animateTo(1f, tween(400))
+                            }
+                        }
+                    }
+                    Canvas(modifier = Modifier.size(10.dp)) {
+                        drawCircle(
+                            color = Color.White.copy(alpha = dotAlpha.value),
+                            radius = size.minDimension / 2f,
+                        )
+                    }
+                    Text(
+                        text = "${uiState.burstCount} 枚",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
         // AIモード: シーン検出バッジ
         AnimatedVisibility(
             visible = uiState.captureMode == CaptureMode.AI_AUTO && uiState.aiDetectedScene.isNotEmpty(),
@@ -426,6 +474,11 @@ fun CameraScreen(
                             viewModel.switchCamera(surface)
                         }
                     },
+                    isBurstMode = uiState.captureMode == CaptureMode.BURST,
+                    isBurstActive = uiState.isBurstActive,
+                    burstCount = uiState.burstCount,
+                    onBurstStart = { viewModel.startBurst() },
+                    onBurstStop = { viewModel.stopBurst() },
                 )
             }
         }

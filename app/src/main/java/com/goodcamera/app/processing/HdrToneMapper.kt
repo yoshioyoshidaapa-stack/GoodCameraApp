@@ -1,6 +1,7 @@
 package com.goodcamera.app.processing
 
 import android.graphics.Bitmap
+import kotlin.math.ln
 import kotlin.math.pow
 
 /**

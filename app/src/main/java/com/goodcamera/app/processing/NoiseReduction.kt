@@ -102,10 +102,14 @@ object NoiseReduction {
                     }
                 }
 
-                val r = (sumR / weightSum).toInt().coerceIn(0, 255)
-                val g = (sumG / weightSum).toInt().coerceIn(0, 255)
-                val b = (sumB / weightSum).toInt().coerceIn(0, 255)
-                result[centerIdx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                if (weightSum > 0f) {
+                    val r = (sumR / weightSum).toInt().coerceIn(0, 255)
+                    val g = (sumG / weightSum).toInt().coerceIn(0, 255)
+                    val b = (sumB / weightSum).toInt().coerceIn(0, 255)
+                    result[centerIdx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                } else {
+                    result[centerIdx] = pixels[centerIdx]
+                }
             }
         }
 

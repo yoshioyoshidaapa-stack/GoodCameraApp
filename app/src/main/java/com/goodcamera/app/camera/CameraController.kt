@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.core.graphics.createBitmap
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.hardware.camera2.*
@@ -21,10 +22,8 @@ import android.util.Log
 import android.util.Size
 import android.view.Surface
 import com.goodcamera.app.processing.ImageProcessor
-import com.goodcamera.app.processing.HdrToneMapper
 import java.io.File
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
@@ -85,7 +84,7 @@ class CameraController(private val context: Context) {
                     onError?.invoke("Camera error: $error")
                 }
             }, cameraHandler)
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
             onError?.invoke("Camera permission not granted")
         }
     }
@@ -129,21 +128,6 @@ class CameraController(private val context: Context) {
             ?: return Size(1920, 1080)
         val sizes = map.getOutputSizes(ImageFormat.JPEG) ?: return Size(1920, 1080)
         return sizes.maxByOrNull { it.width * it.height } ?: Size(1920, 1080)
-    }
-
-    fun getOptimalPreviewSize(cameraId: String? = null, targetWidth: Int = 1920): Size {
-        val id = cameraId ?: currentCameraId ?: return Size(1920, 1080)
-        val chars = cameraManager.getCameraCharacteristics(id)
-        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            ?: return Size(1920, 1080)
-        val sizes = map.getOutputSizes(android.graphics.SurfaceTexture::class.java)
-            ?: return Size(1920, 1080)
-        // Pick the largest size that doesn't exceed targetWidth
-        return sizes
-            .filter { it.width <= targetWidth }
-            .maxByOrNull { it.width * it.height }
-            ?: sizes.minByOrNull { it.width * it.height }
-            ?: Size(1920, 1080)
     }
 
     // ---- Internal: Preview ----
@@ -218,7 +202,7 @@ class CameraController(private val context: Context) {
         val chars = cameraManager.getCameraCharacteristics(cameraId)
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val rawSizes = map?.getOutputSizes(ImageFormat.RAW_SENSOR)
-        if (rawSizes != null && rawSizes.isNotEmpty()) {
+        if (!rawSizes.isNullOrEmpty()) {
             val rawSize = rawSizes.maxByOrNull { it.width * it.height }!!
             rawImageReader = ImageReader.newInstance(
                 rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2
@@ -254,7 +238,7 @@ class CameraController(private val context: Context) {
         val reader = imageReader ?: return
 
         // AFロック後に撮影を実行するラムダ
-        val doCapture = {
+        val doCapture: () -> Unit = {
             try {
                 val builder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     addTarget(reader.surface)
@@ -312,7 +296,6 @@ class CameraController(private val context: Context) {
                 }, cameraHandler)
             } catch (e: CameraAccessException) {
                 onError?.invoke("Capture error: ${e.message}")
-                Unit
             }
         }
 
@@ -364,11 +347,12 @@ class CameraController(private val context: Context) {
                     // PASSIVE_FOCUSED 等の場合はタイムアウトに任せる
                 }
             }, cameraHandler)
-        } catch (e: CameraAccessException) {
+        } catch (_: CameraAccessException) {
             onLocked() // エラー時はそのまま撮影
         }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun captureHdr(frameCount: Int, outputFormat: OutputFormat) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
@@ -434,6 +418,7 @@ class CameraController(private val context: Context) {
         }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun captureNight(frameCount: Int, outputFormat: OutputFormat) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
@@ -498,63 +483,16 @@ class CameraController(private val context: Context) {
     // ---- Image Processing ----
 
     /**
-     * Simple HDR tone mapping: average multiple exposures with weighted blending.
-     * Produces a result with better dynamic range than any single frame.
-     */
-    private fun mergeHdrFrames(frames: List<Bitmap>): Bitmap {
-        if (frames.isEmpty()) return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-        if (frames.size == 1) return frames[0].copy(Bitmap.Config.ARGB_8888, false)
-
-        val width = frames[0].width
-        val height = frames[0].height
-        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-
-        val pixelCount = width * height
-        val rSum = FloatArray(pixelCount)
-        val gSum = FloatArray(pixelCount)
-        val bSum = FloatArray(pixelCount)
-        val weightSum = FloatArray(pixelCount)
-
-        for (frame in frames) {
-            val pixels = IntArray(pixelCount)
-            frame.getPixels(pixels, 0, width, 0, 0, width, height)
-            for (i in pixels.indices) {
-                val r = (pixels[i] shr 16) and 0xFF
-                val g = (pixels[i] shr 8) and 0xFF
-                val b = pixels[i] and 0xFF
-                // Weight based on how well-exposed the pixel is (prefer mid-tones)
-                val luminance = 0.299f * r + 0.587f * g + 0.114f * b
-                val weight = 1f - ((luminance - 128f) / 128f).let { it * it } // Gaussian-like
-                rSum[i] += r * weight
-                gSum[i] += g * weight
-                bSum[i] += b * weight
-                weightSum[i] += weight
-            }
-        }
-
-        val resultPixels = IntArray(pixelCount)
-        for (i in resultPixels.indices) {
-            val w = if (weightSum[i] > 0f) weightSum[i] else 1f
-            val r = (rSum[i] / w).toInt().coerceIn(0, 255)
-            val g = (gSum[i] / w).toInt().coerceIn(0, 255)
-            val b = (bSum[i] / w).toInt().coerceIn(0, 255)
-            resultPixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-        result.setPixels(resultPixels, 0, width, 0, 0, width, height)
-        return result
-    }
-
-    /**
      * Night mode frame stacking: average frames to reduce noise.
      * Averaging N frames reduces noise by sqrt(N).
      */
     private fun mergeNightFrames(frames: List<Bitmap>): Bitmap {
-        if (frames.isEmpty()) return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        if (frames.isEmpty()) return createBitmap(1, 1)
         if (frames.size == 1) return frames[0].copy(Bitmap.Config.ARGB_8888, false)
 
         val width = frames[0].width
         val height = frames[0].height
-        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val result = createBitmap(width, height)
 
         val pixelCount = width * height
         val rSum = IntArray(pixelCount)
@@ -645,7 +583,7 @@ class CameraController(private val context: Context) {
      */
     fun startBurst() {
         val device = cameraDevice ?: return
-        val session = captureSession ?: return
+        captureSession ?: return
         val surface = previewSurface ?: return
 
         if (isBurstRunning) return
@@ -662,8 +600,8 @@ class CameraController(private val context: Context) {
 
         burstImageReader!!.setOnImageAvailableListener({ imgReader ->
             val image = imgReader.acquireNextImage() ?: return@setOnImageAvailableListener
-            try {
-                val buffer = image.planes[0].buffer
+            image.use {
+                val buffer = it.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
 
@@ -674,8 +612,6 @@ class CameraController(private val context: Context) {
                     burstFrameCount++
                     onBurstFrame?.invoke(path, burstFrameCount)
                 }
-            } finally {
-                image.close()
             }
         }, cameraHandler)
 
@@ -803,7 +739,6 @@ class CameraController(private val context: Context) {
         } catch (_: CameraAccessException) { }
 
         val paths = burstPaths.toList()
-        val count = burstFrameCount
 
         // 連写用ImageReaderを解放
         burstImageReader?.close()
@@ -817,8 +752,6 @@ class CameraController(private val context: Context) {
 
         onBurstFinished?.invoke(paths)
     }
-
-    fun isBurstActive(): Boolean = isBurstRunning
 
     // ---- Tap to Focus ----
 
@@ -1054,18 +987,7 @@ class CameraController(private val context: Context) {
 
     // ---- File Saving ----
 
-    private fun saveJpegImage(image: Image): String? {
-        val buffer = image.planes[0].buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-
-        return saveToMediaStore(bytes, "JPEG", "image/jpeg", ".jpg")
-    }
-
     private fun saveDngImage(image: Image) {
-        val cameraId = currentCameraId ?: return
-        val chars = cameraManager.getCameraCharacteristics(cameraId)
-
         // Save raw DNG bytes
         val buffer = image.planes[0].buffer
         val bytes = ByteArray(buffer.remaining())
@@ -1087,6 +1009,7 @@ class CameraController(private val context: Context) {
         mimeType: String,
         extension: String
     ): String? {
+        @Suppress("SpellCheckingInspection")
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val filename = "GoodCam_${prefix}_$timestamp$extension"
 

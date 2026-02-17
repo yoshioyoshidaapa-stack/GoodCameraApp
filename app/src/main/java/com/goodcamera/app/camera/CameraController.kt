@@ -312,6 +312,7 @@ class CameraController(private val context: Context) {
                 }, cameraHandler)
             } catch (e: CameraAccessException) {
                 onError?.invoke("Capture error: ${e.message}")
+                Unit
             }
         }
 

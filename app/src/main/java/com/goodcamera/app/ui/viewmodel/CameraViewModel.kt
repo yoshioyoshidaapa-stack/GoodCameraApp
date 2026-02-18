@@ -50,6 +50,7 @@ class CameraViewModel : ViewModel() {
             if (_uiState.value.captureMode == CaptureMode.AI_AUTO && aiAnalysisJob == null) {
                 startAiAnalysisDeferred()
             }
+            Unit
         }
 
         controller.onCaptureComplete = { path ->

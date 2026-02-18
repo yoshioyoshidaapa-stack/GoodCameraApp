@@ -44,6 +44,14 @@ class CameraViewModel : ViewModel() {
             _uiState.update { it.copy(capabilities = caps, maxZoom = maxZoom) }
         }
 
+        controller.onPreviewStarted = {
+            _uiState.update { it.copy(isPreviewActive = true) }
+            // AIモードならシーン解析を遅延起動（プレビュー安定後に開始）
+            if (_uiState.value.captureMode == CaptureMode.AI_AUTO && aiAnalysisJob == null) {
+                startAiAnalysisDeferred()
+            }
+        }
+
         controller.onCaptureComplete = { path ->
             _uiState.update { it.copy(
                 isCaptureInProgress = false,
@@ -76,12 +84,19 @@ class CameraViewModel : ViewModel() {
     }
 
     fun openCamera(useFront: Boolean, surface: Surface) {
-        _uiState.update { it.copy(usingFrontCamera = useFront, isPreviewActive = true) }
+        _uiState.update { it.copy(usingFrontCamera = useFront) }
         cameraController?.openCamera(useFront, surface)
-        // AIモードならシーン解析を遅延起動（プレビュー安定後に開始）
-        if (_uiState.value.captureMode == CaptureMode.AI_AUTO) {
-            startAiAnalysisDeferred()
-        }
+    }
+
+    fun pauseCamera() {
+        stopAiAnalysis()
+        cameraController?.closeCamera()
+        _uiState.update { it.copy(isPreviewActive = false) }
+    }
+
+    fun resumeCamera(surface: Surface) {
+        val useFront = _uiState.value.usingFrontCamera
+        cameraController?.openCamera(useFront, surface)
     }
 
     fun switchCamera(surface: Surface) {

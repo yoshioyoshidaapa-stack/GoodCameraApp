@@ -52,6 +52,7 @@ class CameraController(private val context: Context) {
     var onCapabilities: ((CameraCapabilities) -> Unit)? = null
     var onCaptureComplete: ((String) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onPreviewStarted: (() -> Unit)? = null
 
     // ---- Public API ----
 
@@ -225,6 +226,7 @@ class CameraController(private val context: Context) {
             }
             previewRequestBuilder = builder
             session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            onPreviewStarted?.invoke()
         } catch (e: CameraAccessException) {
             onError?.invoke("Preview error: ${e.message}")
         }

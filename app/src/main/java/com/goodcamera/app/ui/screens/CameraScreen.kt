@@ -31,10 +31,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -74,6 +77,30 @@ fun CameraScreen(
         if (viewModel.cameraController == null) {
             val controller = CameraController(context)
             viewModel.initController(controller)
+        }
+    }
+
+    // ライフサイクル管理: onPauseでカメラ解放、onResumeで再接続
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    viewModel.pauseCamera()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    textureView?.let { tv ->
+                        val st = tv.surfaceTexture ?: return@let
+                        val surface = android.view.Surface(st)
+                        viewModel.resumeCamera(surface)
+                    }
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -121,7 +148,7 @@ fun CameraScreen(
                         ) {}
 
                         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                            viewModel.cameraController?.closeCamera()
+                            viewModel.pauseCamera()
                             return true
                         }
 

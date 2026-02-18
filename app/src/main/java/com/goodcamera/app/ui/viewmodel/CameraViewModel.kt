@@ -44,14 +44,7 @@ class CameraViewModel : ViewModel() {
             _uiState.update { it.copy(capabilities = caps, maxZoom = maxZoom) }
         }
 
-        controller.onPreviewStarted = {
-            _uiState.update { it.copy(isPreviewActive = true) }
-            // AIモードならシーン解析を遅延起動（プレビュー安定後に開始）
-            if (_uiState.value.captureMode == CaptureMode.AI_AUTO && aiAnalysisJob == null) {
-                startAiAnalysisDeferred()
-            }
-            Unit
-        }
+        controller.onPreviewStarted = { onPreviewReady() }
 
         controller.onCaptureComplete = { path ->
             _uiState.update { it.copy(
@@ -81,6 +74,14 @@ class CameraViewModel : ViewModel() {
                 burstSavedPaths = paths,
                 isCaptureInProgress = false,
             ) }
+        }
+    }
+
+    private fun onPreviewReady() {
+        _uiState.update { it.copy(isPreviewActive = true) }
+        // AIモードならシーン解析を遅延起動（プレビュー安定後に開始）
+        if (_uiState.value.captureMode == CaptureMode.AI_AUTO && aiAnalysisJob == null) {
+            startAiAnalysisDeferred()
         }
     }
 

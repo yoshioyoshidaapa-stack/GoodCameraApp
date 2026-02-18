@@ -135,7 +135,7 @@ object SceneDetector {
         scores[SceneType.GENERAL] = 0.25f
 
         // 最高スコアのシーンを選択
-        val bestEntry = scores.maxByOrNull { it.value }
+        val bestEntry = scores.entries.maxByOrNull { it.value }
         val bestScene = bestEntry?.key ?: SceneType.GENERAL
         val bestConfidence = bestEntry?.value ?: 0.25f
 

@@ -235,9 +235,9 @@ class CameraController(private val context: Context) {
     // ---- Internal: Capture ----
 
     private fun captureSingle(outputFormat: OutputFormat) {
-        val device = cameraDevice ?: return
-        val session = captureSession ?: return
-        val reader = imageReader ?: return
+        val device = cameraDevice ?: run { onError?.invoke("Camera not ready"); return }
+        val session = captureSession ?: run { onError?.invoke("Camera not ready"); return }
+        val reader = imageReader ?: run { onError?.invoke("Camera not ready"); return }
 
         // AFロック後に撮影を実行するラムダ
         val doCapture: () -> Unit = {
@@ -356,9 +356,9 @@ class CameraController(private val context: Context) {
 
     @Suppress("UNUSED_PARAMETER")
     private fun captureHdr(frameCount: Int, outputFormat: OutputFormat) {
-        val device = cameraDevice ?: return
-        val session = captureSession ?: return
-        val reader = imageReader ?: return
+        val device = cameraDevice ?: run { onError?.invoke("Camera not ready"); return }
+        val session = captureSession ?: run { onError?.invoke("Camera not ready"); return }
+        val reader = imageReader ?: run { onError?.invoke("Camera not ready"); return }
 
         val hdrImages = Collections.synchronizedList(mutableListOf<Bitmap>())
 
@@ -422,9 +422,9 @@ class CameraController(private val context: Context) {
 
     @Suppress("UNUSED_PARAMETER")
     private fun captureNight(frameCount: Int, outputFormat: OutputFormat) {
-        val device = cameraDevice ?: return
-        val session = captureSession ?: return
-        val reader = imageReader ?: return
+        val device = cameraDevice ?: run { onError?.invoke("Camera not ready"); return }
+        val session = captureSession ?: run { onError?.invoke("Camera not ready"); return }
+        val reader = imageReader ?: run { onError?.invoke("Camera not ready"); return }
 
         val nightImages = Collections.synchronizedList(mutableListOf<Bitmap>())
         var capturedCount = 0

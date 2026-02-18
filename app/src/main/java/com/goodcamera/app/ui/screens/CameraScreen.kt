@@ -72,14 +72,6 @@ fun CameraScreen(
     val focusScale = remember { Animatable(1.5f) }
     val coroutineScope = rememberCoroutineScope()
 
-    // CameraControllerの初期化
-    LaunchedEffect(Unit) {
-        if (viewModel.cameraController == null) {
-            val controller = CameraController(context)
-            viewModel.initController(controller)
-        }
-    }
-
     // ライフサイクル管理: onPauseでカメラ解放、onResumeで再接続
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -91,6 +83,10 @@ fun CameraScreen(
                 Lifecycle.Event.ON_RESUME -> {
                     textureView?.let { tv ->
                         val st = tv.surfaceTexture ?: return@let
+                        if (viewModel.cameraController == null) {
+                            val controller = CameraController(context)
+                            viewModel.initController(controller)
+                        }
                         val surface = android.view.Surface(st)
                         viewModel.resumeCamera(surface)
                     }
@@ -134,6 +130,11 @@ fun CameraScreen(
                         ) {
                             textureView = this@apply
                             viewModel.previewTextureView = this@apply
+                            // コントローラーが未初期化なら作成（LaunchedEffectとのレース回避）
+                            if (viewModel.cameraController == null) {
+                                val controller = CameraController(ctx)
+                                viewModel.initController(controller)
+                            }
                             val previewSurface = android.view.Surface(surface)
                             viewModel.openCamera(
                                 useFront = uiState.usingFrontCamera,

@@ -91,9 +91,14 @@ class CameraViewModel : ViewModel() {
     }
 
     fun pauseCamera() {
+        timerJob?.cancel()
         stopAiAnalysis()
         cameraController?.closeCamera()
-        _uiState.update { it.copy(isPreviewActive = false) }
+        _uiState.update { it.copy(
+            isPreviewActive = false,
+            isCaptureInProgress = false,
+            timerCountdown = 0,
+        ) }
     }
 
     fun resumeCamera(surface: Surface) {

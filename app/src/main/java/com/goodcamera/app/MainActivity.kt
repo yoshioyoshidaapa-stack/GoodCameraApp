@@ -1,6 +1,8 @@
 package com.goodcamera.app
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,10 +13,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,14 +39,15 @@ class MainActivity : ComponentActivity() {
     private var isReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // SplashScreen API: setContentView/super.onCreate より前に呼ぶ
         val splashScreen = installSplashScreen()
 
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // プレビューが準備完了するまでスプラッシュを維持
         splashScreen.setKeepOnScreenCondition { !isReady }
+
+        // フォールバック: Composeに依存せず、Handlerで確実にスプラッシュを2秒後に解除
+        Handler(Looper.getMainLooper()).postDelayed({ isReady = true }, 2000)
 
         setContent {
             GoodCameraTheme {
@@ -64,12 +65,6 @@ private fun CameraAppContent(
     onPreviewReady: () -> Unit = {},
 ) {
     val cameraPermissionState = rememberPermissionState(android.Manifest.permission.CAMERA)
-
-    // フォールバック: カメラ起動に失敗してもスプラッシュを消す
-    LaunchedEffect(Unit) {
-        delay(2000)
-        onPreviewReady()
-    }
 
     if (cameraPermissionState.status.isGranted) {
         val viewModel: CameraViewModel = viewModel()

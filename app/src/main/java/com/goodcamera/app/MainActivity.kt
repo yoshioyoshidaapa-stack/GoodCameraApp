@@ -1,8 +1,6 @@
 package com.goodcamera.app
 
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -36,24 +34,14 @@ import com.google.accompanist.permissions.shouldShowRationale
 
 class MainActivity : ComponentActivity() {
 
-    private var isReady = false
-
     override fun onCreate(savedInstanceState: Bundle?) {
-        val splashScreen = installSplashScreen()
-
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        splashScreen.setKeepOnScreenCondition { !isReady }
-
-        // フォールバック: Composeに依存せず、Handlerで確実にスプラッシュを2秒後に解除
-        Handler(Looper.getMainLooper()).postDelayed({ isReady = true }, 2000)
-
         setContent {
             GoodCameraTheme {
-                CameraAppContent(
-                    onPreviewReady = { isReady = true },
-                )
+                CameraAppContent()
             }
         }
     }
@@ -61,19 +49,12 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-private fun CameraAppContent(
-    onPreviewReady: () -> Unit = {},
-) {
+private fun CameraAppContent() {
     val cameraPermissionState = rememberPermissionState(android.Manifest.permission.CAMERA)
 
     if (cameraPermissionState.status.isGranted) {
         val viewModel: CameraViewModel = viewModel()
         val uiState by viewModel.uiState.collectAsState()
-
-        // プレビューが開始されたらスプラッシュを消す
-        if (uiState.isPreviewActive) {
-            onPreviewReady()
-        }
 
         when (uiState.currentScreen) {
             AppScreen.CAMERA -> {
@@ -87,18 +68,12 @@ private fun CameraAppContent(
             AppScreen.SETTINGS -> {
                 SettingsScreen(
                     gridType = uiState.gridType,
-                    timerSeconds = uiState.timerSeconds,
-                    autoContrastEnabled = uiState.autoContrastEnabled,
                     onGridTypeChanged = { viewModel.setGridType(it) },
-                    onTimerSecondsChanged = { viewModel.setTimerSeconds(it) },
-                    onAutoContrastChanged = { viewModel.setAutoContrast(it) },
                     onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
                 )
             }
         }
     } else {
-        // パーミッション未許可の場合はスプラッシュをすぐ消す
-        onPreviewReady()
         PermissionRequestScreen(
             shouldShowRationale = cameraPermissionState.status.shouldShowRationale,
             onRequestPermission = { cameraPermissionState.launchPermissionRequest() },

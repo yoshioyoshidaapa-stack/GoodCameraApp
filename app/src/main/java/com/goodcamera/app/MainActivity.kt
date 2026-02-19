@@ -11,8 +11,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -62,6 +64,12 @@ private fun CameraAppContent(
     onPreviewReady: () -> Unit = {},
 ) {
     val cameraPermissionState = rememberPermissionState(android.Manifest.permission.CAMERA)
+
+    // フォールバック: カメラ起動に失敗してもスプラッシュを消す
+    LaunchedEffect(Unit) {
+        delay(2000)
+        onPreviewReady()
+    }
 
     if (cameraPermissionState.status.isGranted) {
         val viewModel: CameraViewModel = viewModel()

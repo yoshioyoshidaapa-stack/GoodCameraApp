@@ -57,6 +57,12 @@ class CameraController(private val context: Context) {
     // ---- Public API ----
 
     fun openCamera(useFront: Boolean, surface: Surface) {
+        // 既存のカメラセッションを確実にクローズしてから開く（二重オープン防止）
+        captureSession?.close()
+        captureSession = null
+        cameraDevice?.close()
+        cameraDevice = null
+
         previewSurface = surface
         val cameraId = findCameraId(useFront) ?: run {
             onError?.invoke("No ${if (useFront) "front" else "back"} camera found")
@@ -252,30 +258,35 @@ class CameraController(private val context: Context) {
                 }
 
                 reader.setOnImageAvailableListener({ imgReader ->
-                    val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    val buffer = image.planes[0].buffer
-                    val bytes = ByteArray(buffer.remaining())
-                    buffer.get(bytes)
-                    image.close()
+                    try {
+                        val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                        val buffer = image.planes[0].buffer
+                        val bytes = ByteArray(buffer.remaining())
+                        buffer.get(bytes)
+                        image.close()
 
-                    // Auto/Proモードは軽い後処理を適用
-                    val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    if (original != null) {
-                        val processed = ImageProcessor.process(original, ImageProcessor.ProcessingConfig(
-                            denoiseEnabled = true,
-                            denoiseStrength = ImageProcessor.DenoiseStrength.LIGHT,
-                            sharpenEnabled = true,
-                            sharpenAmount = 1.0f,
-                            autoLevelsEnabled = true,
-                            autoLevelsClip = 0.5f,
-                        ))
-                        original.recycle()
-                        val path = saveBitmap(processed, "JPEG")
-                        processed.recycle()
-                        path?.let { onCaptureComplete?.invoke(it) }
-                    } else {
-                        val path = saveToMediaStore(bytes, "JPEG", "image/jpeg", ".jpg")
-                        path?.let { onCaptureComplete?.invoke(it) }
+                        // Auto/Proモードは軽い後処理を適用
+                        val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (original != null) {
+                            val processed = ImageProcessor.process(original, ImageProcessor.ProcessingConfig(
+                                denoiseEnabled = true,
+                                denoiseStrength = ImageProcessor.DenoiseStrength.LIGHT,
+                                sharpenEnabled = true,
+                                sharpenAmount = 1.0f,
+                                autoLevelsEnabled = true,
+                                autoLevelsClip = 0.5f,
+                            ))
+                            original.recycle()
+                            val path = saveBitmap(processed, "JPEG")
+                            processed.recycle()
+                            path?.let { onCaptureComplete?.invoke(it) }
+                        } else {
+                            val path = saveToMediaStore(bytes, "JPEG", "image/jpeg", ".jpg")
+                            path?.let { onCaptureComplete?.invoke(it) }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Image processing error", e)
+                        onError?.invoke("Processing error: ${e.message}")
                     }
                 }, cameraHandler)
 
@@ -372,25 +383,31 @@ class CameraController(private val context: Context) {
         var capturedCount = 0
 
         reader.setOnImageAvailableListener({ imgReader ->
-            val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            val buffer = image.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
-            image.close()
+            try {
+                val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                image.close()
 
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            if (bitmap != null) {
-                hdrImages.add(bitmap)
-            }
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (bitmap != null) {
+                    hdrImages.add(bitmap)
+                }
 
-            capturedCount++
-            if (capturedCount >= frameCount) {
-                // Reinhard tone mapping + post-processing pipeline
-                val processed = ImageProcessor.processHdr(hdrImages)
-                val path = saveBitmap(processed, "HDR")
+                capturedCount++
+                if (capturedCount >= frameCount) {
+                    // Reinhard tone mapping + post-processing pipeline
+                    val processed = ImageProcessor.processHdr(hdrImages)
+                    val path = saveBitmap(processed, "HDR")
+                    hdrImages.forEach { it.recycle() }
+                    processed.recycle()
+                    path?.let { onCaptureComplete?.invoke(it) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "HDR processing error", e)
                 hdrImages.forEach { it.recycle() }
-                processed.recycle()
-                path?.let { onCaptureComplete?.invoke(it) }
+                onError?.invoke("HDR error: ${e.message}")
             }
         }, cameraHandler)
 
@@ -430,27 +447,33 @@ class CameraController(private val context: Context) {
         var capturedCount = 0
 
         reader.setOnImageAvailableListener({ imgReader ->
-            val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            val buffer = image.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
-            image.close()
+            try {
+                val image = imgReader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                image.close()
 
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            if (bitmap != null) {
-                nightImages.add(bitmap)
-            }
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (bitmap != null) {
+                    nightImages.add(bitmap)
+                }
 
-            capturedCount++
-            if (capturedCount >= frameCount) {
-                // Frame stacking + noise reduction pipeline
-                val stacked = mergeNightFrames(nightImages)
-                val processed = ImageProcessor.processNight(stacked)
-                stacked.recycle()
-                val path = saveBitmap(processed, "NIGHT")
+                capturedCount++
+                if (capturedCount >= frameCount) {
+                    // Frame stacking + noise reduction pipeline
+                    val stacked = mergeNightFrames(nightImages)
+                    val processed = ImageProcessor.processNight(stacked)
+                    stacked.recycle()
+                    val path = saveBitmap(processed, "NIGHT")
+                    nightImages.forEach { it.recycle() }
+                    processed.recycle()
+                    path?.let { onCaptureComplete?.invoke(it) }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Night processing error", e)
                 nightImages.forEach { it.recycle() }
-                processed.recycle()
-                path?.let { onCaptureComplete?.invoke(it) }
+                onError?.invoke("Night error: ${e.message}")
             }
         }, cameraHandler)
 

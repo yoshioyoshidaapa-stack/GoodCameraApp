@@ -1,11 +1,14 @@
 package com.goodcamera.app.ui.screens
 
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -24,8 +27,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -49,6 +56,23 @@ fun CameraScreen(
         }
     }
 
+    // タップフォーカス状態
+    var focusTapPosition by remember { mutableStateOf<Offset?>(null) }
+    val focusRingAlpha = remember { Animatable(0f) }
+    val focusRingScale = remember { Animatable(1.5f) }
+
+    LaunchedEffect(focusTapPosition) {
+        if (focusTapPosition != null) {
+            focusRingAlpha.snapTo(1f)
+            focusRingScale.snapTo(1.5f)
+            // 縮小アニメーション
+            focusRingScale.animateTo(1f, animationSpec = tween(200))
+            // フォーカス完了を待ってフェードアウト
+            kotlinx.coroutines.delay(600)
+            focusRingAlpha.animateTo(0f, animationSpec = tween(300))
+        }
+    }
+
     // CameraXはLifecycleOwnerにバインドするので自動でライフサイクル管理される
     LaunchedEffect(uiState.usingFrontCamera) {
         viewModel.startCamera(context, lifecycleOwner, previewView)
@@ -62,8 +86,31 @@ fun CameraScreen(
         // カメラプレビュー
         AndroidView(
             factory = { previewView },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        focusTapPosition = offset
+                        viewModel.tapToFocus(previewView, offset.x, offset.y)
+                    }
+                },
         )
+
+        // フォーカスインジケーター
+        val ringRadius = with(LocalDensity.current) { 32.dp.toPx() }
+        focusTapPosition?.let { pos ->
+            androidx.compose.foundation.Canvas(
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                drawCircle(
+                    color = Color.White,
+                    radius = ringRadius * focusRingScale.value,
+                    center = pos,
+                    alpha = focusRingAlpha.value,
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+            }
+        }
 
         // グリッドオーバーレイ
         GridOverlay(gridType = uiState.gridType)

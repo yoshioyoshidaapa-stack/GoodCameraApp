@@ -65,6 +65,10 @@ class CameraViewModel : ViewModel() {
         _uiState.update { it.copy(currentScreen = screen) }
     }
 
+    fun tapToFocus(previewView: PreviewView, x: Float, y: Float) {
+        cameraController?.tapToFocus(previewView, x, y)
+    }
+
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }

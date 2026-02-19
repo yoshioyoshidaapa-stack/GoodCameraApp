@@ -6,7 +6,9 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -16,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
 
 class CameraController(private val context: Context) {
 
@@ -25,6 +28,7 @@ class CameraController(private val context: Context) {
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageCapture: ImageCapture? = null
+    private var camera: Camera? = null
 
     var onCaptureComplete: ((String) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
@@ -56,7 +60,18 @@ class CameraController(private val context: Context) {
                 }
 
                 provider.unbindAll()
-                provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+                camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+
+                // 起動時にセンター領域で即座にAFを開始
+                val centerPoint = previewView.meteringPointFactory.createPoint(
+                    previewView.width / 2f, previewView.height / 2f,
+                )
+                val action = FocusMeteringAction.Builder(
+                    centerPoint,
+                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE,
+                ).setAutoCancelDuration(2, TimeUnit.SECONDS)
+                    .build()
+                camera?.cameraControl?.startFocusAndMetering(action)
 
                 onPreviewStarted?.invoke()
             } catch (e: Exception) {
@@ -64,6 +79,21 @@ class CameraController(private val context: Context) {
                 onError?.invoke("Camera start failed: ${e.message}")
             }
         }, ContextCompat.getMainExecutor(context))
+    }
+
+    /**
+     * タップ位置に高速フォーカスを実行する。
+     * autoCancelDuration を短く設定し、AF完了後すぐに連続AFに戻す。
+     */
+    fun tapToFocus(previewView: PreviewView, x: Float, y: Float) {
+        val cam = camera ?: return
+        val point = previewView.meteringPointFactory.createPoint(x, y)
+        val action = FocusMeteringAction.Builder(
+            point,
+            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE,
+        ).setAutoCancelDuration(2, TimeUnit.SECONDS)
+            .build()
+        cam.cameraControl.startFocusAndMetering(action)
     }
 
     fun capturePhoto() {

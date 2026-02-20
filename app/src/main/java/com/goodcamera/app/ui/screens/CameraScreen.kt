@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Collections
@@ -33,12 +34,16 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.goodcamera.app.camera.AppScreen
+import com.goodcamera.app.camera.CaptureMode
 import com.goodcamera.app.camera.GridType
 import com.goodcamera.app.ui.components.GridOverlay
+import com.goodcamera.app.ui.components.ModeSelectorBar
 import com.goodcamera.app.ui.viewmodel.CameraViewModel
 
 @Composable
@@ -162,46 +167,80 @@ fun CameraScreen(
             }
         }
 
+        // 接写モードインジケーター
+        if (uiState.isMacroActive) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 12.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xCC4CAF50))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = "\uD83C\uDF3C 接写",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
         // 下部コントロール
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 24.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(bottom = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // ギャラリーボタン
-            IconButton(
-                onClick = { viewModel.navigateTo(AppScreen.GALLERY) },
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Collections,
-                    contentDescription = "ギャラリー",
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp),
-                )
-            }
-
-            // シャッターボタン
-            ShutterButton(
-                isCapturing = uiState.isCaptureInProgress,
-                onClick = { viewModel.capturePhoto() },
+            // モード選択バー
+            ModeSelectorBar(
+                currentMode = uiState.captureMode,
+                onModeSelected = { viewModel.setCaptureMode(it) },
+                modifier = Modifier.padding(bottom = 16.dp),
             )
 
-            // カメラ切替ボタン
-            IconButton(
-                onClick = { viewModel.switchCamera(context, lifecycleOwner, previewView) },
-                modifier = Modifier.size(48.dp),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Cameraswitch,
-                    contentDescription = "カメラ切替",
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp),
+                // ギャラリーボタン
+                IconButton(
+                    onClick = { viewModel.navigateTo(AppScreen.GALLERY) },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Collections,
+                        contentDescription = "ギャラリー",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+
+                // シャッターボタン
+                ShutterButton(
+                    isCapturing = uiState.isCaptureInProgress,
+                    onClick = { viewModel.capturePhoto() },
                 )
+
+                // カメラ切替ボタン
+                IconButton(
+                    onClick = { viewModel.switchCamera(context, lifecycleOwner, previewView) },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Cameraswitch,
+                        contentDescription = "カメラ切替",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
             }
         }
 

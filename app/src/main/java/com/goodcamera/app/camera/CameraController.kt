@@ -7,7 +7,9 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -167,6 +169,47 @@ class CameraController(private val context: Context) {
                 }
             },
         )
+    }
+
+    /**
+     * 接写モードを有効にする。
+     * - AF_MODE_MACRO: 近距離特化のAFアルゴリズムに切り替え
+     * - LENS_FOCUS_DISTANCE: 最近接 (minFocusDistance) にフォーカスを寄せる
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun enableMacroMode(minFocusDistance: Float) {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_MACRO,
+            )
+            .setCaptureRequestOption(
+                CaptureRequest.LENS_FOCUS_DISTANCE,
+                minFocusDistance,
+            )
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Macro mode ON – AF_MODE_MACRO, focusDist=$minFocusDistance")
+    }
+
+    /**
+     * 接写モードを無効にし、通常の CONTINUOUS_PICTURE AF に戻す。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun disableMacroMode() {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+            )
+            .clearCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Macro mode OFF – restored CONTINUOUS_PICTURE AF")
     }
 
     fun release() {

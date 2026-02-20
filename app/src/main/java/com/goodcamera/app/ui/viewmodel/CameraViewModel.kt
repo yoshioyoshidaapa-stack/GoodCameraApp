@@ -60,6 +60,21 @@ class CameraViewModel : ViewModel() {
         cameraController?.startCamera(lifecycleOwner, previewView, useFront)
     }
 
+    fun setCaptureMode(mode: CaptureMode) {
+        val prev = _uiState.value.captureMode
+        _uiState.update { it.copy(captureMode = mode) }
+
+        // 接写モードの切り替え
+        if (mode == CaptureMode.MACRO && prev != CaptureMode.MACRO) {
+            val minFocus = _uiState.value.capabilities.minFocusDistance
+            cameraController?.enableMacroMode(minFocus)
+            _uiState.update { it.copy(isMacroActive = true) }
+        } else if (mode != CaptureMode.MACRO && prev == CaptureMode.MACRO) {
+            cameraController?.disableMacroMode()
+            _uiState.update { it.copy(isMacroActive = false) }
+        }
+    }
+
     fun setGridType(type: GridType) {
         _uiState.update { it.copy(gridType = type) }
     }

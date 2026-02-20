@@ -28,6 +28,7 @@ enum class CaptureMode(val label: String) {
     PRO("Pro"),
     HDR("HDR"),
     NIGHT("Night"),
+    MACRO("接写"),
     BURST("Burst"),
 }
 
@@ -88,4 +89,6 @@ data class CameraUiState(
     val burstSavedPaths: List<String> = emptyList(),
     // Focus
     val focusLocked: Boolean = false,
+    // Macro
+    val isMacroActive: Boolean = false,
 )

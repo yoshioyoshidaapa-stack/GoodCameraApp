@@ -60,16 +60,25 @@ fun CameraScreen(
     var focusTapPosition by remember { mutableStateOf<Offset?>(null) }
     val focusRingAlpha = remember { Animatable(0f) }
     val focusRingScale = remember { Animatable(1.5f) }
+    var focusRingColor by remember { mutableStateOf(Color.White) }
+
+    // フォーカスロック完了でリングの色を変える
+    LaunchedEffect(uiState.focusLocked) {
+        if (focusTapPosition != null) {
+            focusRingColor = if (uiState.focusLocked) Color.Green else Color.Yellow
+        }
+    }
 
     LaunchedEffect(focusTapPosition) {
         if (focusTapPosition != null) {
+            focusRingColor = Color.White
             focusRingAlpha.snapTo(1f)
-            focusRingScale.snapTo(1.5f)
-            // 縮小アニメーション
-            focusRingScale.animateTo(1f, animationSpec = tween(200))
-            // フォーカス完了を待ってフェードアウト
-            kotlinx.coroutines.delay(600)
-            focusRingAlpha.animateTo(0f, animationSpec = tween(300))
+            focusRingScale.snapTo(1.4f)
+            // 高速縮小 (150ms)
+            focusRingScale.animateTo(1f, animationSpec = tween(150))
+            // フォーカスロック待ち → フェードアウト
+            kotlinx.coroutines.delay(800)
+            focusRingAlpha.animateTo(0f, animationSpec = tween(200))
         }
     }
 
@@ -103,7 +112,7 @@ fun CameraScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 drawCircle(
-                    color = Color.White,
+                    color = focusRingColor,
                     radius = ringRadius * focusRingScale.value,
                     center = pos,
                     alpha = focusRingAlpha.value,

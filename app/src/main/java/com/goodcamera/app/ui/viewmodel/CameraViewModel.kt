@@ -35,6 +35,9 @@ class CameraViewModel : ViewModel() {
                         isCaptureInProgress = false,
                     ) }
                 }
+                onFocusComplete = { success ->
+                    _uiState.update { it.copy(focusLocked = success) }
+                }
             }
         }
 

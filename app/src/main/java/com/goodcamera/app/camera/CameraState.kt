@@ -86,4 +86,6 @@ data class CameraUiState(
     val isBurstActive: Boolean = false,
     val burstCount: Int = 0,
     val burstSavedPaths: List<String> = emptyList(),
+    // Focus
+    val focusLocked: Boolean = false,
 )

@@ -195,6 +195,27 @@ class CameraController(private val context: Context) {
     }
 
     /**
+     * 接写モード中にフォーカス距離を変更する (スライダー連動)。
+     * AF を OFF にし、指定距離にマニュアルフォーカスを設定する。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun setManualFocusDistance(distance: Float) {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_OFF,
+            )
+            .setCaptureRequestOption(
+                CaptureRequest.LENS_FOCUS_DISTANCE,
+                distance,
+            )
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+    }
+
+    /**
      * 接写モードを無効にし、通常の CONTINUOUS_PICTURE AF に戻す。
      */
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop

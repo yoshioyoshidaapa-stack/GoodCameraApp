@@ -15,11 +15,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -200,8 +203,18 @@ fun CameraScreen(
             ModeSelectorBar(
                 currentMode = uiState.captureMode,
                 onModeSelected = { viewModel.setCaptureMode(it) },
-                modifier = Modifier.padding(bottom = 16.dp),
+                modifier = Modifier.padding(bottom = 12.dp),
             )
+
+            // 接写モード: マニュアルフォーカススライダー
+            if (uiState.isMacroActive && uiState.capabilities.minFocusDistance > 0f) {
+                MacroFocusSlider(
+                    focusDistance = uiState.macroFocusDistance,
+                    maxDistance = uiState.capabilities.minFocusDistance,
+                    onDistanceChanged = { viewModel.setMacroFocusDistance(it) },
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                )
+            }
 
             Row(
                 modifier = Modifier
@@ -291,6 +304,51 @@ private fun ShutterButton(
                     if (isCapturing) MaterialTheme.colorScheme.primary
                     else Color.White,
                 ),
+        )
+    }
+}
+
+@Composable
+private fun MacroFocusSlider(
+    focusDistance: Float,
+    maxDistance: Float,
+    onDistanceChanged: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.FilterCenterFocus,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.7f),
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = "∞",
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 13.sp,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        Slider(
+            value = focusDistance,
+            onValueChange = onDistanceChanged,
+            valueRange = 0f..maxDistance,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 4.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Color(0xFF4CAF50),
+                activeTrackColor = Color(0xFF4CAF50),
+                inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+            ),
+        )
+        Text(
+            text = "近",
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 13.sp,
+            modifier = Modifier.padding(end = 2.dp),
         )
     }
 }

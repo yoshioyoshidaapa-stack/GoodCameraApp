@@ -68,11 +68,16 @@ class CameraViewModel : ViewModel() {
         if (mode == CaptureMode.MACRO && prev != CaptureMode.MACRO) {
             val minFocus = _uiState.value.capabilities.minFocusDistance
             cameraController?.enableMacroMode(minFocus)
-            _uiState.update { it.copy(isMacroActive = true) }
+            _uiState.update { it.copy(isMacroActive = true, macroFocusDistance = minFocus) }
         } else if (mode != CaptureMode.MACRO && prev == CaptureMode.MACRO) {
             cameraController?.disableMacroMode()
             _uiState.update { it.copy(isMacroActive = false) }
         }
+    }
+
+    fun setMacroFocusDistance(distance: Float) {
+        _uiState.update { it.copy(macroFocusDistance = distance) }
+        cameraController?.setManualFocusDistance(distance)
     }
 
     fun setGridType(type: GridType) {

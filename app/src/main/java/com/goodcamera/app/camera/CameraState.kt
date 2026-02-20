@@ -91,4 +91,5 @@ data class CameraUiState(
     val focusLocked: Boolean = false,
     // Macro
     val isMacroActive: Boolean = false,
+    val macroFocusDistance: Float = 0f,
 )

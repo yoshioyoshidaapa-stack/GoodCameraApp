@@ -11,7 +11,10 @@ import android.provider.MediaStore
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -321,19 +324,33 @@ private fun ZoomableImage(item: GalleryItem) {
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(item.id) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    val newScale = (scale * zoom).coerceIn(1f, 5f)
-                    scale = newScale
-                    if (newScale > 1f) {
-                        // パンはズーム中のみ有効。画像が画面外に行きすぎないよう制限
-                        val maxOffsetX = (newScale - 1f) * size.width / 2f
-                        val maxOffsetY = (newScale - 1f) * size.height / 2f
-                        offsetX = (offsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
-                        offsetY = (offsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
-                    } else {
-                        offsetX = 0f
-                        offsetY = 0f
-                    }
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        val zoomChange = event.calculateZoom()
+                        val panChange = event.calculatePan()
+
+                        if (zoomChange != 1f) {
+                            // ピンチズーム（2本指）: 常に処理してイベント消費
+                            val newScale = (scale * zoomChange).coerceIn(1f, 5f)
+                            scale = newScale
+                            event.changes.forEach { it.consume() }
+                        }
+
+                        if (scale > 1f) {
+                            // ズーム中のパン: イベント消費してスワイプを抑制
+                            val maxX = (scale - 1f) * size.width / 2f
+                            val maxY = (scale - 1f) * size.height / 2f
+                            offsetX = (offsetX + panChange.x).coerceIn(-maxX, maxX)
+                            offsetY = (offsetY + panChange.y).coerceIn(-maxY, maxY)
+                            event.changes.forEach { it.consume() }
+                        } else {
+                            // 等倍時: イベント消費しない → HorizontalPagerのスワイプが有効
+                            offsetX = 0f
+                            offsetY = 0f
+                        }
+                    } while (event.changes.any { it.pressed })
                 }
             },
         contentAlignment = Alignment.Center,

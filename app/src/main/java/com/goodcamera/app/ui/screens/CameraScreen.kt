@@ -18,8 +18,10 @@ import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -185,6 +187,74 @@ fun CameraScreen(
             ) {
                 Text(
                     text = "\uD83C\uDF3C 接写",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        // ナイトモード撮影中オーバーレイ
+        if (uiState.captureMode == CaptureMode.NIGHT && uiState.isCaptureInProgress) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (uiState.nightProcessing) {
+                        CircularProgressIndicator(color = Color(0xFF7C4DFF))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "処理中...",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    } else {
+                        Text(
+                            text = "${uiState.nightCapturedFrames} / ${uiState.nightFrameCount}",
+                            color = Color.White,
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = {
+                                uiState.nightCapturedFrames.toFloat() / uiState.nightFrameCount
+                            },
+                            modifier = Modifier
+                                .width(200.dp)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = Color(0xFF7C4DFF),
+                            trackColor = Color.White.copy(alpha = 0.3f),
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "撮影中...端末を動かさないでください",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        // ナイトモードインジケーター
+        if (uiState.captureMode == CaptureMode.NIGHT && !uiState.isCaptureInProgress) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 12.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xCC7C4DFF))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = "Night",
                     color = Color.White,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,

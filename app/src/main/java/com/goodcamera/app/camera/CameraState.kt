@@ -93,4 +93,7 @@ data class CameraUiState(
     // Macro
     val isMacroActive: Boolean = false,
     val macroFocusDistance: Float = 0f,
+    // Night Mode
+    val nightCapturedFrames: Int = 0,
+    val nightProcessing: Boolean = false,
 )

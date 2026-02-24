@@ -2,6 +2,9 @@ package com.goodcamera.app.camera
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
@@ -22,11 +25,13 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -225,6 +230,108 @@ class CameraController(private val context: Context) {
                 }
             },
         )
+    }
+
+    /**
+     * ナイトモード撮影: 複数フレームをメモリ上にキャプチャして返す。
+     *
+     * @param frameCount 撮影するフレーム数
+     * @param onFrameCaptured フレームキャプチャ毎のコールバック (捕捉済み枚数)
+     * @param onAllFrames 全フレーム取得後のコールバック
+     */
+    fun captureNightFrames(
+        frameCount: Int,
+        onFrameCaptured: (Int) -> Unit,
+        onAllFrames: (List<Bitmap>) -> Unit,
+    ) {
+        val capture = imageCapture ?: run {
+            onError?.invoke("Camera not ready")
+            return
+        }
+        val frames = Collections.synchronizedList(mutableListOf<Bitmap>())
+        val executor = ContextCompat.getMainExecutor(context)
+
+        fun captureNext(remaining: Int) {
+            if (remaining <= 0) {
+                onAllFrames(frames.toList())
+                return
+            }
+            capture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    val bitmap = imageProxyToBitmap(image)
+                    image.close()
+                    if (bitmap != null) {
+                        frames.add(bitmap)
+                        onFrameCaptured(frames.size)
+                    }
+                    captureNext(remaining - 1)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Night frame capture failed", exception)
+                    // エラーでも続行し、取得済みフレームで合成
+                    captureNext(remaining - 1)
+                }
+            })
+        }
+
+        captureNext(frameCount)
+    }
+
+    /**
+     * Bitmap を JPEG として MediaStore に保存する。
+     */
+    fun saveBitmapToGallery(bitmap: Bitmap): String? {
+        @Suppress("SpellCheckingInspection")
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val filename = "GoodCam_Night_$timestamp.jpg"
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    Environment.DIRECTORY_DCIM + "/GoodCamera",
+                )
+            }
+        }
+
+        return try {
+            val uri = context.contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues,
+            ) ?: return null
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+            }
+            uri.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save night mode photo", e)
+            null
+        }
+    }
+
+    private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
+        return try {
+            val buffer = image.planes[0].buffer
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+            // 回転補正
+            val rotation = image.imageInfo.rotationDegrees
+            if (rotation != 0) {
+                val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+                val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                bitmap.recycle()
+                rotated
+            } else {
+                bitmap
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "ImageProxy to Bitmap conversion failed", e)
+            null
+        }
     }
 
     /**

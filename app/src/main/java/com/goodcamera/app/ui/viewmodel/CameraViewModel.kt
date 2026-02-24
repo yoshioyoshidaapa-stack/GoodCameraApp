@@ -4,11 +4,16 @@ import android.content.Context
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.goodcamera.app.camera.*
+import com.goodcamera.app.processing.FrameStacker
+import com.goodcamera.app.processing.ImageProcessor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class CameraViewModel : ViewModel() {
 
@@ -65,7 +70,65 @@ class CameraViewModel : ViewModel() {
     fun capturePhoto() {
         if (_uiState.value.isCaptureInProgress) return
         _uiState.update { it.copy(isCaptureInProgress = true) }
-        cameraController?.capturePhoto()
+
+        if (_uiState.value.captureMode == CaptureMode.NIGHT) {
+            captureNightMode()
+        } else {
+            cameraController?.capturePhoto()
+        }
+    }
+
+    private fun captureNightMode() {
+        val frameCount = _uiState.value.nightFrameCount
+        _uiState.update { it.copy(nightCapturedFrames = 0, nightProcessing = false) }
+
+        cameraController?.captureNightFrames(
+            frameCount = frameCount,
+            onFrameCaptured = { count ->
+                _uiState.update { it.copy(nightCapturedFrames = count) }
+            },
+            onAllFrames = { frames ->
+                if (frames.isEmpty()) {
+                    _uiState.update { it.copy(
+                        isCaptureInProgress = false,
+                        errorMessage = "ナイトモード撮影に失敗しました",
+                    ) }
+                    return@captureNightFrames
+                }
+                _uiState.update { it.copy(nightProcessing = true) }
+
+                viewModelScope.launch(Dispatchers.Default) {
+                    try {
+                        // フレームスタッキング
+                        val stacked = FrameStacker.stack(frames)
+                        frames.forEach { it.recycle() }
+
+                        // ナイトモード後処理
+                        val processed = ImageProcessor.processNight(stacked)
+                        if (processed !== stacked) stacked.recycle()
+
+                        // 保存
+                        val path = cameraController?.saveBitmapToGallery(processed)
+                        processed.recycle()
+
+                        _uiState.update { it.copy(
+                            isCaptureInProgress = false,
+                            nightCapturedFrames = 0,
+                            nightProcessing = false,
+                            lastCapturedPath = path,
+                        ) }
+                    } catch (e: Exception) {
+                        frames.forEach { it.recycle() }
+                        _uiState.update { it.copy(
+                            isCaptureInProgress = false,
+                            nightCapturedFrames = 0,
+                            nightProcessing = false,
+                            errorMessage = "ナイトモード処理に失敗: ${e.message}",
+                        ) }
+                    }
+                }
+            },
+        )
     }
 
     fun switchCamera(context: Context, lifecycleOwner: LifecycleOwner, previewView: PreviewView) {

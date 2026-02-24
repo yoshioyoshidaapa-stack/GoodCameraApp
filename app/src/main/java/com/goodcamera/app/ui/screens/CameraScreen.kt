@@ -201,7 +201,8 @@ fun CameraScreen(
                 onEvChanged = { viewModel.setExposureCompensation(it) },
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .padding(start = 8.dp),
+                    .fillMaxHeight()
+                    .padding(start = 8.dp, top = 48.dp, bottom = 120.dp),
             )
         }
 
@@ -391,11 +392,11 @@ private fun VerticalEvSlider(
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
         )
-        // Sliderを90度回転して縦にする
-        Box(
+        // Sliderを90度回転して縦にする — 親の高さに合わせて伸縮
+        BoxWithConstraints(
             modifier = Modifier
                 .width(48.dp)
-                .height(300.dp),
+                .weight(1f),
             contentAlignment = Alignment.Center,
         ) {
             Slider(
@@ -404,7 +405,7 @@ private fun VerticalEvSlider(
                 valueRange = evRange.first.toFloat()..evRange.last.toFloat(),
                 steps = (evRange.last - evRange.first) - 1,
                 modifier = Modifier
-                    .width(300.dp)
+                    .width(maxHeight)
                     .graphicsLayer {
                         rotationZ = -90f
                         transformOrigin = TransformOrigin.Center

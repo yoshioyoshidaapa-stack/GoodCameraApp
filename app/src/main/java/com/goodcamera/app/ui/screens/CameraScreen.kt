@@ -395,7 +395,7 @@ private fun VerticalEvSlider(
         Box(
             modifier = Modifier
                 .width(48.dp)
-                .height(200.dp),
+                .height(300.dp),
             contentAlignment = Alignment.Center,
         ) {
             Slider(
@@ -404,7 +404,7 @@ private fun VerticalEvSlider(
                 valueRange = evRange.first.toFloat()..evRange.last.toFloat(),
                 steps = (evRange.last - evRange.first) - 1,
                 modifier = Modifier
-                    .width(200.dp)
+                    .width(300.dp)
                     .graphicsLayer {
                         rotationZ = -90f
                         transformOrigin = TransformOrigin.Center

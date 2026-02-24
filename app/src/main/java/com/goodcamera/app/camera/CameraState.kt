@@ -43,6 +43,7 @@ data class CameraCapabilities(
     val minFocusDistance: Float = 0f,
     val supportsRaw: Boolean = false,
     val supportedIsos: List<Int> = listOf(100, 200, 400, 800, 1600, 3200),
+    val exposureCompensationRange: IntRange = 0..0,
 )
 
 enum class GridType(val label: String) {

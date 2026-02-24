@@ -250,6 +250,14 @@ class CameraController(private val context: Context) {
     /**
      * カメラハードウェアから性能情報を取得し、UIに通知する。
      */
+    /**
+     * 露出補正インデックスを設定する。
+     */
+    fun setExposureCompensation(index: Int) {
+        val cam = camera ?: return
+        cam.cameraControl.setExposureCompensationIndex(index)
+    }
+
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     private fun queryCameraCapabilities() {
         val cam = camera ?: return
@@ -258,10 +266,12 @@ class CameraController(private val context: Context) {
             val minFocus = camera2Info.getCameraCharacteristic(
                 CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE,
             ) ?: 0f
+            val evRange = cam.cameraInfo.exposureState.exposureCompensationRange
             val capabilities = CameraCapabilities(
                 minFocusDistance = minFocus,
+                exposureCompensationRange = evRange,
             )
-            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus")
+            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evRange")
             onCapabilitiesReady?.invoke(capabilities)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to query camera capabilities", e)

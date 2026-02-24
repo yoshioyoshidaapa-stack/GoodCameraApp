@@ -83,6 +83,20 @@ class CameraViewModel : ViewModel() {
         cameraController?.setManualFocusDistance(distance)
     }
 
+    fun setExposureCompensation(index: Int) {
+        _uiState.update { it.copy(
+            settings = it.settings.copy(exposureCompensation = index),
+        ) }
+        cameraController?.setExposureCompensation(index)
+    }
+
+    fun setFocusDistance(distance: Float) {
+        _uiState.update { it.copy(
+            settings = it.settings.copy(focusDistance = distance, autoFocus = false),
+        ) }
+        cameraController?.setManualFocusDistance(distance)
+    }
+
     fun setGridType(type: GridType) {
         _uiState.update { it.copy(gridType = type) }
     }

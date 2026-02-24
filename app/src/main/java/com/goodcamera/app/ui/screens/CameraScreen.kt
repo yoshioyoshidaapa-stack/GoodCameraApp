@@ -33,7 +33,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -190,6 +192,19 @@ fun CameraScreen(
             }
         }
 
+        // 右側: 縦の露出補正スライダー
+        val evRange = uiState.capabilities.exposureCompensationRange
+        if (evRange.first < evRange.last) {
+            VerticalEvSlider(
+                ev = uiState.settings.exposureCompensation,
+                evRange = evRange,
+                onEvChanged = { viewModel.setExposureCompensation(it) },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 8.dp),
+            )
+        }
+
         // 下部コントロール
         Column(
             modifier = Modifier
@@ -206,12 +221,17 @@ fun CameraScreen(
                 modifier = Modifier.padding(bottom = 12.dp),
             )
 
-            // 接写モード: マニュアルフォーカススライダー
-            if (uiState.isMacroActive && uiState.capabilities.minFocusDistance > 0f) {
-                MacroFocusSlider(
-                    focusDistance = uiState.macroFocusDistance,
+            // フォーカススライダー (全モード共通)
+            if (uiState.capabilities.minFocusDistance > 0f) {
+                val isMacro = uiState.isMacroActive
+                FocusSlider(
+                    focusDistance = if (isMacro) uiState.macroFocusDistance else uiState.settings.focusDistance,
                     maxDistance = uiState.capabilities.minFocusDistance,
-                    onDistanceChanged = { viewModel.setMacroFocusDistance(it) },
+                    onDistanceChanged = { d ->
+                        if (isMacro) viewModel.setMacroFocusDistance(d)
+                        else viewModel.setFocusDistance(d)
+                    },
+                    accentColor = if (isMacro) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
                 )
             }
@@ -309,10 +329,11 @@ private fun ShutterButton(
 }
 
 @Composable
-private fun MacroFocusSlider(
+private fun FocusSlider(
     focusDistance: Float,
     maxDistance: Float,
     onDistanceChanged: (Float) -> Unit,
+    accentColor: Color,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -339,8 +360,8 @@ private fun MacroFocusSlider(
                 .weight(1f)
                 .padding(horizontal = 4.dp),
             colors = SliderDefaults.colors(
-                thumbColor = Color(0xFF4CAF50),
-                activeTrackColor = Color(0xFF4CAF50),
+                thumbColor = accentColor,
+                activeTrackColor = accentColor,
                 inactiveTrackColor = Color.White.copy(alpha = 0.3f),
             ),
         )
@@ -349,6 +370,63 @@ private fun MacroFocusSlider(
             color = Color.White.copy(alpha = 0.7f),
             fontSize = 13.sp,
             modifier = Modifier.padding(end = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun VerticalEvSlider(
+    ev: Int,
+    evRange: IntRange,
+    onEvChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "+",
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        // Sliderを90度回転して縦にする
+        Box(
+            modifier = Modifier
+                .width(48.dp)
+                .height(200.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Slider(
+                value = ev.toFloat(),
+                onValueChange = { onEvChanged(it.toInt()) },
+                valueRange = evRange.first.toFloat()..evRange.last.toFloat(),
+                steps = (evRange.last - evRange.first) - 1,
+                modifier = Modifier
+                    .width(200.dp)
+                    .graphicsLayer {
+                        rotationZ = -90f
+                        transformOrigin = TransformOrigin.Center
+                    },
+                colors = SliderDefaults.colors(
+                    thumbColor = Color(0xFFFFC107),
+                    activeTrackColor = Color(0xFFFFC107),
+                    inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                ),
+            )
+        }
+        Text(
+            text = "-",
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "${if (ev >= 0) "+" else ""}$ev",
+            color = Color.White,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }

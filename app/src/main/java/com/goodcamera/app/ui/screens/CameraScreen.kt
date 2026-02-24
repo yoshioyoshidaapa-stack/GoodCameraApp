@@ -192,7 +192,7 @@ fun CameraScreen(
             }
         }
 
-        // 右側: 縦の露出補正スライダー
+        // 左側: 縦の露出補正スライダー
         val evRange = uiState.capabilities.exposureCompensationRange
         if (evRange.first < evRange.last) {
             VerticalEvSlider(
@@ -200,8 +200,8 @@ fun CameraScreen(
                 evRange = evRange,
                 onEvChanged = { viewModel.setExposureCompensation(it) },
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 8.dp),
+                    .align(Alignment.CenterStart)
+                    .padding(start = 8.dp),
             )
         }
 

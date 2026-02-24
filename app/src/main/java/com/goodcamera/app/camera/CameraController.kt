@@ -270,7 +270,7 @@ class CameraController(private val context: Context) {
             val evRangeRaw = cam.cameraInfo.exposureState.exposureCompensationRange
             val capabilities = CameraCapabilities(
                 minFocusDistance = minFocus,
-                exposureCompensationRange = evRangeRaw.lower..evRangeRaw.upper,
+                exposureCompensationRange = IntRange(evRangeRaw.lower, evRangeRaw.upper),
             )
             Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evRangeRaw")
             onCapabilitiesReady?.invoke(capabilities)

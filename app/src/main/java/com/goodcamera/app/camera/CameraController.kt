@@ -144,8 +144,21 @@ class CameraController(private val context: Context) {
      * - autoCancelDuration=1.5s で素早く連続AFに復帰
      * - 完了コールバックでUIにロック状態を通知
      */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     fun tapToFocus(previewView: PreviewView, x: Float, y: Float) {
         val cam = camera ?: return
+        // マニュアルフォーカス中の場合、AF_MODEをCONTINUOUS_PICTUREに戻す
+        // (setManualFocusDistanceでAF_MODE_OFFにされている可能性がある)
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+            )
+            .clearCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+
         awaitingFocusDistance = true
         val point = previewView.meteringPointFactory.createPoint(x, y, METERING_POINT_SIZE)
         val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)

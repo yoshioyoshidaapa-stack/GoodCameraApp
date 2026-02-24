@@ -117,6 +117,10 @@ class CameraViewModel : ViewModel() {
     }
 
     fun tapToFocus(previewView: PreviewView, x: Float, y: Float) {
+        // マニュアルフォーカスからオートフォーカスに復帰
+        _uiState.update { it.copy(
+            settings = it.settings.copy(autoFocus = true),
+        ) }
         cameraController?.tapToFocus(previewView, x, y)
     }
 

@@ -263,6 +263,7 @@ private fun FocusControl(
                     colors = SliderDefaults.colors(
                         thumbColor = MaterialTheme.colorScheme.primary,
                         activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.3f),
                     ),
                 )
                 Text("近", color = Color.White, fontSize = 14.sp)
@@ -290,6 +291,7 @@ private fun ExposureCompensationControl(
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = Color.White.copy(alpha = 0.3f),
             ),
         )
     }

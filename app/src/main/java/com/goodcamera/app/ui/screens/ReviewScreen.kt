@@ -357,6 +357,7 @@ private fun ProcessingSettingsPanel(
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.3f),
                         ),
                     )
                     Text("強", color = Color.Gray, fontSize = 11.sp)
@@ -396,6 +397,7 @@ private fun ProcessingSettingsPanel(
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.3f),
                         ),
                     )
                     Text("強", color = Color.Gray, fontSize = 11.sp)

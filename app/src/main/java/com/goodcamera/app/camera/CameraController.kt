@@ -51,6 +51,7 @@ class CameraController(private val context: Context) {
     private var orientationListener: OrientationEventListener? = null
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    @androidx.camera.core.ExperimentalZeroShutterLag
     fun startCamera(
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView,
@@ -266,12 +267,12 @@ class CameraController(private val context: Context) {
             val minFocus = camera2Info.getCameraCharacteristic(
                 CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE,
             ) ?: 0f
-            val evRange = cam.cameraInfo.exposureState.exposureCompensationRange
+            val evRangeRaw = cam.cameraInfo.exposureState.exposureCompensationRange
             val capabilities = CameraCapabilities(
                 minFocusDistance = minFocus,
-                exposureCompensationRange = evRange,
+                exposureCompensationRange = evRangeRaw.lower..evRangeRaw.upper,
             )
-            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evRange")
+            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evRangeRaw")
             onCapabilitiesReady?.invoke(capabilities)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to query camera capabilities", e)
@@ -287,10 +288,10 @@ class CameraController(private val context: Context) {
         orientationListener = object : OrientationEventListener(context) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN) return
-                val rotation = when {
-                    orientation >= 315 || orientation < 45 -> Surface.ROTATION_0
-                    orientation in 45 until 135 -> Surface.ROTATION_270
-                    orientation in 135 until 225 -> Surface.ROTATION_180
+                val rotation = when (orientation) {
+                    in 315..359, in 0 until 45 -> Surface.ROTATION_0
+                    in 45 until 135 -> Surface.ROTATION_270
+                    in 135 until 225 -> Surface.ROTATION_180
                     else -> Surface.ROTATION_90
                 }
                 imageCapture?.targetRotation = rotation

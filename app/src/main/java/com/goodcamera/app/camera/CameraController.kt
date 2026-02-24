@@ -268,11 +268,13 @@ class CameraController(private val context: Context) {
                 CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE,
             ) ?: 0f
             val evRangeRaw = cam.cameraInfo.exposureState.exposureCompensationRange
+            val evMin: Int = evRangeRaw.lower
+            val evMax: Int = evRangeRaw.upper
             val capabilities = CameraCapabilities(
                 minFocusDistance = minFocus,
-                exposureCompensationRange = IntRange(evRangeRaw.lower, evRangeRaw.upper),
+                exposureCompensationRange = evMin..evMax,
             )
-            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evRangeRaw")
+            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evMin..$evMax")
             onCapabilitiesReady?.invoke(capabilities)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to query camera capabilities", e)

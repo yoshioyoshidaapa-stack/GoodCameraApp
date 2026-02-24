@@ -38,6 +38,9 @@ class CameraViewModel : ViewModel() {
                 onFocusComplete = { success ->
                     _uiState.update { it.copy(focusLocked = success) }
                 }
+                onCapabilitiesReady = { caps ->
+                    _uiState.update { it.copy(capabilities = caps) }
+                }
             }
         }
 

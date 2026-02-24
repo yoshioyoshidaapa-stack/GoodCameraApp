@@ -2,12 +2,16 @@ package com.goodcamera.app.camera
 
 import android.content.ContentValues
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.view.OrientationEventListener
+import android.view.Surface
 import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.Camera
@@ -41,6 +45,10 @@ class CameraController(private val context: Context) {
     var onPreviewStarted: (() -> Unit)? = null
     /** フォーカスロック完了コールバック (true=成功, false=失敗) */
     var onFocusComplete: ((Boolean) -> Unit)? = null
+    /** カメラ性能取得完了コールバック */
+    var onCapabilitiesReady: ((CameraCapabilities) -> Unit)? = null
+
+    private var orientationListener: OrientationEventListener? = null
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     fun startCamera(
@@ -83,6 +91,12 @@ class CameraController(private val context: Context) {
 
                 provider.unbindAll()
                 camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+
+                // カメラ性能を取得してUIに通知
+                queryCameraCapabilities()
+
+                // デバイスの回転に追従して撮影画像の向きを設定
+                startOrientationListener()
 
                 // 起動直後にセンターAFをトリガー (小領域で高速収束)
                 triggerCenterFocus(previewView)
@@ -233,7 +247,51 @@ class CameraController(private val context: Context) {
         Log.d(TAG, "Macro mode OFF – restored CONTINUOUS_PICTURE AF")
     }
 
+    /**
+     * カメラハードウェアから性能情報を取得し、UIに通知する。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    private fun queryCameraCapabilities() {
+        val cam = camera ?: return
+        try {
+            val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+            val minFocus = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE,
+            ) ?: 0f
+            val capabilities = CameraCapabilities(
+                minFocusDistance = minFocus,
+            )
+            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus")
+            onCapabilitiesReady?.invoke(capabilities)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to query camera capabilities", e)
+        }
+    }
+
+    /**
+     * デバイスの物理的な向きを監視し、ImageCapture の targetRotation を更新する。
+     * これにより撮影画像が端末の傾きに応じた正しい向きで保存される。
+     */
+    private fun startOrientationListener() {
+        orientationListener?.disable()
+        orientationListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val rotation = when {
+                    orientation >= 315 || orientation < 45 -> Surface.ROTATION_0
+                    orientation in 45 until 135 -> Surface.ROTATION_270
+                    orientation in 135 until 225 -> Surface.ROTATION_180
+                    else -> Surface.ROTATION_90
+                }
+                imageCapture?.targetRotation = rotation
+            }
+        }
+        orientationListener?.enable()
+    }
+
     fun release() {
+        orientationListener?.disable()
+        orientationListener = null
         cameraProvider?.unbindAll()
     }
 }

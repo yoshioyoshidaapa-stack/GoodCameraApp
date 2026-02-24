@@ -11,10 +11,13 @@ import android.provider.MediaStore
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -27,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -52,7 +57,7 @@ fun GalleryScreen(
 ) {
     val context = LocalContext.current
     var photos by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
-    var selectedPhoto by remember { mutableStateOf<GalleryItem?>(null) }
+    var selectedIndex by remember { mutableIntStateOf(-1) }
     var isLoading by remember { mutableStateOf(true) }
 
     // 写真一覧を読み込む
@@ -63,15 +68,16 @@ fun GalleryScreen(
         isLoading = false
     }
 
-    // 写真の詳細表示
-    if (selectedPhoto != null) {
+    // 写真の詳細表示（スワイプ対応）
+    if (selectedIndex >= 0 && photos.isNotEmpty()) {
         PhotoDetailScreen(
-            item = selectedPhoto!!,
-            onBack = { selectedPhoto = null },
+            photos = photos,
+            initialIndex = selectedIndex,
+            onBack = { selectedIndex = -1 },
             onDelete = { item ->
                 context.contentResolver.delete(item.uri, null, null)
                 photos = photos.filter { it.id != item.id }
-                selectedPhoto = null
+                if (photos.isEmpty()) selectedIndex = -1
             },
             onShare = { item ->
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -140,7 +146,7 @@ fun GalleryScreen(
                     items(photos, key = { it.id }) { item ->
                         GalleryThumbnail(
                             item = item,
-                            onClick = { selectedPhoto = item },
+                            onClick = { selectedIndex = photos.indexOf(item) },
                         )
                     }
                 }
@@ -197,26 +203,18 @@ private fun GalleryThumbnail(
 
 @Composable
 private fun PhotoDetailScreen(
-    item: GalleryItem,
+    photos: List<GalleryItem>,
+    initialIndex: Int,
     onBack: () -> Unit,
     onDelete: (GalleryItem) -> Unit,
     onShare: (GalleryItem) -> Unit,
 ) {
-    val context = LocalContext.current
-    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex,
+        pageCount = { photos.size },
+    )
+    val currentItem = photos.getOrNull(pagerState.currentPage) ?: return
     var showDeleteDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(item.id) {
-        bitmap = withContext(Dispatchers.IO) {
-            try {
-                context.contentResolver.openInputStream(item.uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
-    }
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -226,7 +224,7 @@ private fun PhotoDetailScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showDeleteDialog = false
-                    onDelete(item)
+                    onDelete(currentItem)
                 }) {
                     Text("削除", color = MaterialTheme.colorScheme.error)
                 }
@@ -244,14 +242,25 @@ private fun PhotoDetailScreen(
             .fillMaxSize()
             .background(Color.Black),
     ) {
-        bitmap?.let { bmp ->
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = item.name,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
+        // スワイプ可能なページャー
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            key = { photos[it].id },
+        ) { page ->
+            ZoomableImage(item = photos[page])
         }
+
+        // ページインジケーター
+        Text(
+            text = "${pagerState.currentPage + 1} / ${photos.size}",
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 13.sp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp),
+        )
 
         // 上部バー
         Row(
@@ -266,7 +275,7 @@ private fun PhotoDetailScreen(
                 Icon(Icons.Filled.ArrowBack, "戻る", tint = Color.White)
             }
             Row {
-                IconButton(onClick = { onShare(item) }) {
+                IconButton(onClick = { onShare(currentItem) }) {
                     Icon(Icons.Filled.Share, "共有", tint = Color.White)
                 }
                 IconButton(onClick = { showDeleteDialog = true }) {
@@ -274,6 +283,76 @@ private fun PhotoDetailScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * ピンチズーム・パン対応の画像表示
+ */
+@Composable
+private fun ZoomableImage(item: GalleryItem) {
+    val context = LocalContext.current
+    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+    LaunchedEffect(item.id) {
+        bitmap = withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.openInputStream(item.uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+
+    // ページ切り替え時にズームをリセット
+    LaunchedEffect(item.id) {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(item.id) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    val newScale = (scale * zoom).coerceIn(1f, 5f)
+                    scale = newScale
+                    if (newScale > 1f) {
+                        // パンはズーム中のみ有効。画像が画面外に行きすぎないよう制限
+                        val maxOffsetX = (newScale - 1f) * size.width / 2f
+                        val maxOffsetY = (newScale - 1f) * size.height / 2f
+                        offsetX = (offsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
+                        offsetY = (offsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
+                    } else {
+                        offsetX = 0f
+                        offsetY = 0f
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        bitmap?.let { bmp ->
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = item.name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                    },
+            )
+        } ?: CircularProgressIndicator(color = Color.White)
     }
 }
 

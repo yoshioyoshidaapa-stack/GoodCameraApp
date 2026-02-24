@@ -38,6 +38,17 @@ class CameraViewModel : ViewModel() {
                 onFocusComplete = { success ->
                     _uiState.update { it.copy(focusLocked = success) }
                 }
+                onFocusDistanceChanged = { distance ->
+                    _uiState.update { state ->
+                        if (state.isMacroActive) {
+                            state.copy(macroFocusDistance = distance)
+                        } else {
+                            state.copy(
+                                settings = state.settings.copy(focusDistance = distance),
+                            )
+                        }
+                    }
+                }
                 onCapabilitiesReady = { caps ->
                     _uiState.update { it.copy(capabilities = caps) }
                 }

@@ -2,8 +2,11 @@ package com.goodcamera.app.camera
 
 import android.content.ContentValues
 import android.content.Context
+import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -45,10 +48,15 @@ class CameraController(private val context: Context) {
     var onPreviewStarted: (() -> Unit)? = null
     /** フォーカスロック完了コールバック (true=成功, false=失敗) */
     var onFocusComplete: ((Boolean) -> Unit)? = null
+    /** タップToフォーカス後のフォーカス距離通知コールバック (diopters) */
+    var onFocusDistanceChanged: ((Float) -> Unit)? = null
     /** カメラ性能取得完了コールバック */
     var onCapabilitiesReady: ((CameraCapabilities) -> Unit)? = null
 
     private var orientationListener: OrientationEventListener? = null
+    /** タップToフォーカス中にフォーカス距離の読み取りを待っているか */
+    @Volatile
+    private var awaitingFocusDistance = false
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     @androidx.camera.core.ExperimentalZeroShutterLag
@@ -70,6 +78,25 @@ class CameraController(private val context: Context) {
                         CaptureRequest.CONTROL_AF_MODE,
                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
                     )
+                    .setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            result: TotalCaptureResult,
+                        ) {
+                            if (!awaitingFocusDistance) return
+                            val afState = result.get(CaptureResult.CONTROL_AF_STATE) ?: return
+                            if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                            ) {
+                                awaitingFocusDistance = false
+                                val distance = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                                if (distance != null) {
+                                    onFocusDistanceChanged?.invoke(distance)
+                                }
+                            }
+                        }
+                    })
                 val preview = previewBuilder.build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
@@ -119,6 +146,7 @@ class CameraController(private val context: Context) {
      */
     fun tapToFocus(previewView: PreviewView, x: Float, y: Float) {
         val cam = camera ?: return
+        awaitingFocusDistance = true
         val point = previewView.meteringPointFactory.createPoint(x, y, METERING_POINT_SIZE)
         val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
             .setAutoCancelDuration(1500, TimeUnit.MILLISECONDS)

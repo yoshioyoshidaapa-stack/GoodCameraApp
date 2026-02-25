@@ -96,4 +96,18 @@ data class CameraUiState(
     // Night Mode
     val nightCapturedFrames: Int = 0,
     val nightProcessing: Boolean = false,
+    // Face Detection
+    val faceDetectionActive: Boolean = false,
+    val detectedFaces: List<NormalizedFace> = emptyList(),
+    val faceFocusLocked: Boolean = false,
+)
+
+/**
+ * UIに渡す顔の正規化座標 (0..1)
+ */
+data class NormalizedFace(
+    val centerX: Float,
+    val centerY: Float,
+    val width: Float,
+    val height: Float,
 )

@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.goodcamera.app.camera.AppScreen
 import com.goodcamera.app.camera.CaptureMode
 import com.goodcamera.app.camera.GridType
+import com.goodcamera.app.camera.NormalizedFace
 import com.goodcamera.app.ui.components.GridOverlay
 import com.goodcamera.app.ui.components.ModeSelectorBar
 import com.goodcamera.app.ui.viewmodel.CameraViewModel
@@ -133,8 +134,39 @@ fun CameraScreen(
             }
         }
 
+        // 顔検出オーバーレイ
+        if (uiState.faceDetectionActive && uiState.detectedFaces.isNotEmpty()) {
+            FaceDetectionOverlay(
+                faces = uiState.detectedFaces,
+                isFocusLocked = uiState.faceFocusLocked,
+            )
+        }
+
         // グリッドオーバーレイ
         GridOverlay(gridType = uiState.gridType)
+
+        // AIシーン検出バッジ
+        if (uiState.captureMode == CaptureMode.AI_AUTO && uiState.aiDetectedScene.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 12.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (uiState.faceDetectionActive) Color(0xCCFF6F00)
+                        else Color(0xCC1E88E5),
+                    )
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = "AI ${uiState.aiDetectedScene}",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
 
         // 上部コントロール
         Row(
@@ -500,5 +532,47 @@ private fun VerticalEvSlider(
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 2.dp),
         )
+    }
+}
+
+/**
+ * 顔検出オーバーレイ: 検出された顔の位置に枠を描画する。
+ */
+@Composable
+private fun FaceDetectionOverlay(
+    faces: List<NormalizedFace>,
+    isFocusLocked: Boolean,
+) {
+    val borderColor = if (isFocusLocked) Color(0xFFFF6F00) else Color.White.copy(alpha = 0.7f)
+    val strokeWidth = with(LocalDensity.current) { 1.5.dp.toPx() }
+    val cornerLength = with(LocalDensity.current) { 12.dp.toPx() }
+
+    androidx.compose.foundation.Canvas(
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        for (face in faces) {
+            val cx = face.centerX * size.width
+            val cy = face.centerY * size.height
+            val fw = face.width * size.width * 1.3f  // 少し余白をつける
+            val fh = face.height * size.height * 1.3f
+            val left = cx - fw / 2f
+            val top = cy - fh / 2f
+            val right = cx + fw / 2f
+            val bottom = cy + fh / 2f
+
+            // 四隅のコーナーブラケットを描画
+            // 左上
+            drawLine(borderColor, Offset(left, top), Offset(left + cornerLength, top), strokeWidth)
+            drawLine(borderColor, Offset(left, top), Offset(left, top + cornerLength), strokeWidth)
+            // 右上
+            drawLine(borderColor, Offset(right, top), Offset(right - cornerLength, top), strokeWidth)
+            drawLine(borderColor, Offset(right, top), Offset(right, top + cornerLength), strokeWidth)
+            // 左下
+            drawLine(borderColor, Offset(left, bottom), Offset(left + cornerLength, bottom), strokeWidth)
+            drawLine(borderColor, Offset(left, bottom), Offset(left, bottom - cornerLength), strokeWidth)
+            // 右下
+            drawLine(borderColor, Offset(right, bottom), Offset(right - cornerLength, bottom), strokeWidth)
+            drawLine(borderColor, Offset(right, bottom), Offset(right, bottom - cornerLength), strokeWidth)
+        }
     }
 }

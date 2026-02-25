@@ -1,6 +1,8 @@
 package com.goodcamera.app.ui.viewmodel
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.util.Log
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
@@ -8,19 +10,39 @@ import androidx.lifecycle.viewModelScope
 import com.goodcamera.app.camera.*
 import com.goodcamera.app.processing.FrameStacker
 import com.goodcamera.app.processing.ImageProcessor
+import com.goodcamera.app.processing.SceneDetector
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 class CameraViewModel : ViewModel() {
+
+    companion object {
+        private const val TAG = "CameraViewModel"
+        /** 顔フォーカスの最小間隔 (ms) — チラつき防止 */
+        private const val FACE_FOCUS_THROTTLE_MS = 1500L
+        /** 顔位置が大きく動いた時のみ再フォーカスする閾値 (正規化座標) */
+        private const val FACE_MOVE_THRESHOLD = 0.08f
+    }
 
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
     private var cameraController: CameraController? = null
+    private var previewViewRef: PreviewView? = null
+    private var aiAnalysisJob: Job? = null
+
+    // 顔フォーカスのスロットリング状態
+    private var lastFaceFocusTime = 0L
+    private var lastFaceFocusCenterX = -1f
+    private var lastFaceFocusCenterY = -1f
 
     fun startCamera(context: Context, lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
         if (cameraController == null) {
@@ -57,14 +79,23 @@ class CameraViewModel : ViewModel() {
                 onCapabilitiesReady = { caps ->
                     _uiState.update { it.copy(capabilities = caps) }
                 }
+                onFacesDetected = { faces ->
+                    handleFacesDetected(faces)
+                }
             }
         }
 
+        previewViewRef = previewView
         cameraController!!.startCamera(
             lifecycleOwner = lifecycleOwner,
             previewView = previewView,
             useFront = _uiState.value.usingFrontCamera,
         )
+
+        // AIモードが既に選択されている場合、解析ループを開始
+        if (_uiState.value.captureMode == CaptureMode.AI_AUTO && aiAnalysisJob?.isActive != true) {
+            startAiAnalysisLoop()
+        }
     }
 
     fun capturePhoto() {
@@ -150,6 +181,70 @@ class CameraViewModel : ViewModel() {
             cameraController?.disableMacroMode()
             _uiState.update { it.copy(isMacroActive = false) }
         }
+
+        // AIモードの切り替え → シーン解析ループ開始/停止
+        if (mode == CaptureMode.AI_AUTO && prev != CaptureMode.AI_AUTO) {
+            startAiAnalysisLoop()
+        } else if (mode != CaptureMode.AI_AUTO && prev == CaptureMode.AI_AUTO) {
+            stopAiAnalysisLoop()
+        }
+    }
+
+    /**
+     * AIモード時のシーン解析ループ。
+     * PreviewViewからビットマップをキャプチャし、SceneDetectorで解析する。
+     * ポートレート検出時に顔検出を有効化する。
+     */
+    private fun startAiAnalysisLoop() {
+        aiAnalysisJob?.cancel()
+        aiAnalysisJob = viewModelScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                val preview = previewViewRef ?: run {
+                    delay(500)
+                    return@launch
+                }
+                try {
+                    _uiState.update { it.copy(aiAnalyzing = true) }
+                    val bitmap = preview.bitmap
+                    if (bitmap != null) {
+                        val analysis = SceneDetector.analyze(bitmap)
+                        bitmap.recycle()
+                        _uiState.update { it.copy(
+                            aiDetectedScene = analysis.sceneType.label,
+                            aiConfidence = analysis.confidence,
+                            aiAnalyzing = false,
+                        ) }
+                        // ポートレートなら顔検出を自動有効化
+                        onSceneDetected(analysis.sceneType)
+                    } else {
+                        _uiState.update { it.copy(aiAnalyzing = false) }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "AI analysis failed", e)
+                    _uiState.update { it.copy(aiAnalyzing = false) }
+                }
+                delay(1500) // 1.5秒ごとに再解析
+            }
+        }
+        Log.d(TAG, "AI analysis loop started")
+    }
+
+    private fun stopAiAnalysisLoop() {
+        aiAnalysisJob?.cancel()
+        aiAnalysisJob = null
+        // 顔検出も停止
+        cameraController?.disableFaceDetection()
+        _uiState.update { it.copy(
+            aiAnalyzing = false,
+            aiDetectedScene = "",
+            aiConfidence = 0f,
+            faceDetectionActive = false,
+            detectedFaces = emptyList(),
+            faceFocusLocked = false,
+        ) }
+        lastFaceFocusCenterX = -1f
+        lastFaceFocusCenterY = -1f
+        Log.d(TAG, "AI analysis loop stopped")
     }
 
     fun setMacroFocusDistance(distance: Float) {
@@ -187,12 +282,77 @@ class CameraViewModel : ViewModel() {
         cameraController?.tapToFocus(previewView, x, y)
     }
 
+    /**
+     * AIシーン検出結果に基づいて顔検出の有効/無効を切り替える。
+     * ポートレートと判定されたら顔検出を開始する。
+     */
+    fun onSceneDetected(sceneType: SceneDetector.SceneType) {
+        val shouldDetectFaces = sceneType == SceneDetector.SceneType.PORTRAIT
+        val currentlyActive = _uiState.value.faceDetectionActive
+        if (shouldDetectFaces && !currentlyActive) {
+            cameraController?.enableFaceDetection()
+            _uiState.update { it.copy(faceDetectionActive = true) }
+            Log.d(TAG, "Portrait detected → face detection ON")
+        } else if (!shouldDetectFaces && currentlyActive) {
+            cameraController?.disableFaceDetection()
+            _uiState.update { it.copy(
+                faceDetectionActive = false,
+                detectedFaces = emptyList(),
+                faceFocusLocked = false,
+            ) }
+            lastFaceFocusCenterX = -1f
+            lastFaceFocusCenterY = -1f
+            Log.d(TAG, "Non-portrait scene → face detection OFF")
+        }
+    }
+
+    /**
+     * Camera2の顔検出結果を処理し、最大の顔にフォーカスを合わせる。
+     * スロットリングにより、顔位置が大きく動いた時だけ再フォーカスする。
+     */
+    private fun handleFacesDetected(faces: List<DetectedFace>) {
+        if (faces.isEmpty()) {
+            _uiState.update { it.copy(detectedFaces = emptyList(), faceFocusLocked = false) }
+            return
+        }
+
+        // UIに顔位置を通知
+        val normalizedFaces = faces.map { f ->
+            NormalizedFace(f.centerX, f.centerY, f.width, f.height)
+        }
+        _uiState.update { it.copy(detectedFaces = normalizedFaces) }
+
+        // 最大の顔を選択 (面積が一番大きい)
+        val primaryFace = faces.maxByOrNull { it.width * it.height } ?: return
+        val previewView = previewViewRef ?: return
+
+        // スロットリング: 時間ベース + 移動距離ベース
+        val now = System.currentTimeMillis()
+        val dx = abs(primaryFace.centerX - lastFaceFocusCenterX)
+        val dy = abs(primaryFace.centerY - lastFaceFocusCenterY)
+        val hasMoved = dx > FACE_MOVE_THRESHOLD || dy > FACE_MOVE_THRESHOLD
+        val timeElapsed = now - lastFaceFocusTime > FACE_FOCUS_THROTTLE_MS
+
+        if (hasMoved || (timeElapsed && lastFaceFocusCenterX >= 0f)) {
+            // 初回 or 顔が大きく動いた or 十分な時間が経過 → 再フォーカス
+            if (timeElapsed || lastFaceFocusCenterX < 0f) {
+                cameraController?.focusOnFace(previewView, primaryFace.centerX, primaryFace.centerY)
+                lastFaceFocusTime = now
+                lastFaceFocusCenterX = primaryFace.centerX
+                lastFaceFocusCenterY = primaryFace.centerY
+                _uiState.update { it.copy(faceFocusLocked = true) }
+                Log.d(TAG, "Face focus → (${primaryFace.centerX}, ${primaryFace.centerY})")
+            }
+        }
+    }
+
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
 
     override fun onCleared() {
         super.onCleared()
+        aiAnalysisJob?.cancel()
         cameraController?.release()
     }
 }

@@ -1,7 +1,6 @@
 package com.goodcamera.app.ui.viewmodel
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.util.Log
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
@@ -20,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 class CameraViewModel : ViewModel() {
@@ -197,17 +197,21 @@ class CameraViewModel : ViewModel() {
      */
     private fun startAiAnalysisLoop() {
         aiAnalysisJob?.cancel()
-        aiAnalysisJob = viewModelScope.launch(Dispatchers.Default) {
+        aiAnalysisJob = viewModelScope.launch {
+            // プレビューが開始されるまで待つ
+            while (isActive && previewViewRef == null) {
+                delay(500)
+            }
             while (isActive) {
-                val preview = previewViewRef ?: run {
-                    delay(500)
-                    return@launch
-                }
                 try {
                     _uiState.update { it.copy(aiAnalyzing = true) }
-                    val bitmap = preview.bitmap
+                    // PreviewView.getBitmap() はメインスレッドで呼ぶ必要がある
+                    val bitmap = previewViewRef?.bitmap
                     if (bitmap != null) {
-                        val analysis = SceneDetector.analyze(bitmap)
+                        // 重い解析処理はバックグラウンドで実行
+                        val analysis = withContext(Dispatchers.Default) {
+                            SceneDetector.analyze(bitmap)
+                        }
                         bitmap.recycle()
                         _uiState.update { it.copy(
                             aiDetectedScene = analysis.sceneType.label,

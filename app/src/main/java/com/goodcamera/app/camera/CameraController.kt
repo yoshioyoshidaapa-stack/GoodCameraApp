@@ -68,11 +68,15 @@ class CameraController(private val context: Context) {
     /** タップToフォーカス中にフォーカス距離の読み取りを待っているか */
     @Volatile
     private var awaitingFocusDistance = false
-    /** 顔検出が有効か */
+    /** 顔検出結果をコールバックに転送するか */
     @Volatile
     private var faceDetectionEnabled = false
     /** センサーのアクティブ領域 (顔座標→正規化座標の変換に使用) */
     private var sensorActiveRect: Rect? = null
+    /** センサー回転角度 (0, 90, 180, 270) */
+    private var sensorOrientation: Int = 0
+    /** フロントカメラかどうか (プレビューのミラーリングに影響) */
+    private var isFrontCamera: Boolean = false
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     @androidx.camera.core.ExperimentalZeroShutterLag
@@ -81,18 +85,26 @@ class CameraController(private val context: Context) {
         previewView: PreviewView,
         useFront: Boolean,
     ) {
+        // カメラ切替時に顔検出状態をリセット
+        faceDetectionEnabled = false
+        isFrontCamera = useFront
+
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             try {
                 val provider = future.get()
                 cameraProvider = provider
 
-                // Camera2 interop: プレビューにCONTINUOUS_PICTURE AFを強制設定
+                // Camera2 interop: AF + 顔検出をセッション開始時に設定
                 val previewBuilder = Preview.Builder()
                 Camera2Interop.Extender(previewBuilder)
                     .setCaptureRequestOption(
                         CaptureRequest.CONTROL_AF_MODE,
                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+                    )
+                    .setCaptureRequestOption(
+                        CaptureRequest.STATISTICS_FACE_DETECT_MODE,
+                        CaptureRequest.STATISTICS_FACE_DETECT_MODE_SIMPLE,
                     )
                     .setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(
@@ -114,15 +126,17 @@ class CameraController(private val context: Context) {
                                 }
                             }
 
-                            // 顔検出結果の読み取り
+                            // 顔検出結果の読み取り (モードはセッション開始時に設定済み)
                             if (faceDetectionEnabled) {
                                 val faces = result.get(CaptureResult.STATISTICS_FACES)
                                 val activeRect = sensorActiveRect
-                                if (faces != null && activeRect != null) {
+                                if (faces != null && faces.isNotEmpty() && activeRect != null) {
                                     val detected = faces.mapNotNull { face ->
                                         convertFaceToNormalized(face, activeRect)
                                     }
-                                    onFacesDetected?.invoke(detected)
+                                    if (detected.isNotEmpty()) {
+                                        onFacesDetected?.invoke(detected)
+                                    }
                                 }
                             }
                         }
@@ -149,6 +163,9 @@ class CameraController(private val context: Context) {
 
                 provider.unbindAll()
                 camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+
+                // センサー情報取得 (顔座標変換に必須)
+                querySensorInfo()
 
                 // カメラ性能を取得してUIに通知
                 queryCameraCapabilities()
@@ -433,72 +450,31 @@ class CameraController(private val context: Context) {
     }
 
     /**
-     * 顔検出を有効にする。
-     * Camera2の STATISTICS_FACE_DETECT_MODE を設定し、
-     * セッションキャプチャコールバックで顔情報を読み取る。
+     * 顔検出結果のコールバック転送を有効にする。
+     * Camera2の FACE_DETECT_MODE はセッション開始時に設定済みなので、
+     * このメソッドはコールバック転送フラグのみ切り替える。
      */
-    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     fun enableFaceDetection() {
-        val cam = camera ?: return
-        try {
-            val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
-            // サポートされている顔検出モードを確認
-            val maxMode = camera2Info.getCameraCharacteristic(
-                CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT,
-            ) ?: 0
-            if (maxMode == 0) {
-                Log.d(TAG, "Face detection not supported on this device")
-                return
-            }
-            // アクティブ領域を保存 (座標変換に使用)
-            sensorActiveRect = camera2Info.getCameraCharacteristic(
-                CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE,
-            )
-            val camera2Control = Camera2CameraControl.from(cam.cameraControl)
-            val options = CaptureRequestOptions.Builder()
-                .setCaptureRequestOption(
-                    CaptureRequest.STATISTICS_FACE_DETECT_MODE,
-                    CaptureRequest.STATISTICS_FACE_DETECT_MODE_SIMPLE,
-                )
-                .build()
-            camera2Control.addCaptureRequestOptions(options)
-            faceDetectionEnabled = true
-            Log.d(TAG, "Face detection ON (maxFaces=$maxMode)")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to enable face detection", e)
-        }
+        faceDetectionEnabled = true
+        Log.d(TAG, "Face detection forwarding ON")
     }
 
     /**
-     * 顔検出を無効にする。
+     * 顔検出結果のコールバック転送を無効にする。
      */
-    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     fun disableFaceDetection() {
-        val cam = camera ?: return
         faceDetectionEnabled = false
-        try {
-            val camera2Control = Camera2CameraControl.from(cam.cameraControl)
-            val options = CaptureRequestOptions.Builder()
-                .setCaptureRequestOption(
-                    CaptureRequest.STATISTICS_FACE_DETECT_MODE,
-                    CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF,
-                )
-                .build()
-            camera2Control.addCaptureRequestOptions(options)
-            Log.d(TAG, "Face detection OFF")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to disable face detection", e)
-        }
+        Log.d(TAG, "Face detection forwarding OFF")
     }
 
     /**
      * 検出された顔の中心にフォーカスを合わせる。
-     * 正規化座標 (0..1) で受け取り、PreviewView座標に変換してメータリングを実行。
+     * プレビュー座標 (0..1) で受け取り、PreviewView座標に変換してメータリングを実行。
      */
-    fun focusOnFace(previewView: PreviewView, normalizedCenterX: Float, normalizedCenterY: Float) {
+    fun focusOnFace(previewView: PreviewView, viewNormX: Float, viewNormY: Float) {
         val cam = camera ?: return
-        val viewX = normalizedCenterX * previewView.width
-        val viewY = normalizedCenterY * previewView.height
+        val viewX = viewNormX * previewView.width
+        val viewY = viewNormY * previewView.height
         val point = previewView.meteringPointFactory.createPoint(viewX, viewY, FACE_METERING_POINT_SIZE)
         val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
             .setAutoCancelDuration(2000, TimeUnit.MILLISECONDS)
@@ -507,7 +483,36 @@ class CameraController(private val context: Context) {
     }
 
     /**
-     * Camera2の Face を正規化座標 (0..1) の DetectedFace に変換する。
+     * センサー情報を取得・保存する (顔座標変換に必須)。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    private fun querySensorInfo() {
+        val cam = camera ?: return
+        try {
+            val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+            sensorActiveRect = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE,
+            )
+            sensorOrientation = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_ORIENTATION,
+            ) ?: 0
+            val maxFaces = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT,
+            ) ?: 0
+            Log.d(TAG, "Sensor: orientation=$sensorOrientation, activeRect=$sensorActiveRect, " +
+                "maxFaces=$maxFaces, front=$isFrontCamera")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to query sensor info", e)
+        }
+    }
+
+    /**
+     * Camera2の Face をプレビュー座標 (0..1) の DetectedFace に変換する。
+     *
+     * Camera2の顔座標はセンサーのアクティブ領域座標系。
+     * PreviewView は端末の向きに合わせて画像を回転表示するため、
+     * センサー回転角度に応じた座標変換が必要。
+     * フロントカメラの場合はさらにX軸ミラーリングが必要。
      */
     private fun convertFaceToNormalized(face: Face, activeRect: Rect): DetectedFace? {
         val bounds = face.bounds
@@ -515,11 +520,43 @@ class CameraController(private val context: Context) {
         val sensorW = activeRect.width().toFloat()
         val sensorH = activeRect.height().toFloat()
         if (sensorW <= 0f || sensorH <= 0f) return null
+
+        // センサー正規化座標 (0..1)
+        val sx = ((bounds.left + bounds.right) / 2f - activeRect.left) / sensorW
+        val sy = ((bounds.top + bounds.bottom) / 2f - activeRect.top) / sensorH
+        val sw = bounds.width().toFloat() / sensorW
+        val sh = bounds.height().toFloat() / sensorH
+
+        // センサー回転角度に応じてプレビュー座標に変換
+        var vx: Float
+        var vy: Float
+        var vw: Float
+        var vh: Float
+        when (sensorOrientation) {
+            90 -> {
+                vx = sy; vy = 1f - sx; vw = sh; vh = sw
+            }
+            180 -> {
+                vx = 1f - sx; vy = 1f - sy; vw = sw; vh = sh
+            }
+            270 -> {
+                vx = 1f - sy; vy = sx; vw = sh; vh = sw
+            }
+            else -> {
+                vx = sx; vy = sy; vw = sw; vh = sh
+            }
+        }
+
+        // フロントカメラはプレビューがX軸ミラーリングされている
+        if (isFrontCamera) {
+            vx = 1f - vx
+        }
+
         return DetectedFace(
-            centerX = ((bounds.left + bounds.right) / 2f - activeRect.left) / sensorW,
-            centerY = ((bounds.top + bounds.bottom) / 2f - activeRect.top) / sensorH,
-            width = bounds.width().toFloat() / sensorW,
-            height = bounds.height().toFloat() / sensorH,
+            centerX = vx.coerceIn(0f, 1f),
+            centerY = vy.coerceIn(0f, 1f),
+            width = vw,
+            height = vh,
             score = face.score,
         )
     }

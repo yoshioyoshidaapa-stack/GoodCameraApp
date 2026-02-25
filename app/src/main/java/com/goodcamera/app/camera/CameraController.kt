@@ -528,19 +528,21 @@ class CameraController(private val context: Context) {
         val sh = bounds.height().toFloat() / sensorH
 
         // センサー回転角度に応じてプレビュー座標に変換
+        // SENSOR_ORIENTATION は「出力画像を正立させるための CW 回転角度」
+        // CW 90°: (x,y)→(1-y, x)  CW 270°: (x,y)→(y, 1-x)
         var vx: Float
         var vy: Float
         var vw: Float
         var vh: Float
         when (sensorOrientation) {
             90 -> {
-                vx = sy; vy = 1f - sx; vw = sh; vh = sw
+                vx = 1f - sy; vy = sx; vw = sh; vh = sw
             }
             180 -> {
                 vx = 1f - sx; vy = 1f - sy; vw = sw; vh = sh
             }
             270 -> {
-                vx = 1f - sy; vy = sx; vw = sh; vh = sw
+                vx = sy; vy = 1f - sx; vw = sh; vh = sw
             }
             else -> {
                 vx = sx; vy = sy; vw = sw; vh = sh

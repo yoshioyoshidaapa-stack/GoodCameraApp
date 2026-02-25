@@ -77,6 +77,9 @@ class CameraController(private val context: Context) {
     private var sensorOrientation: Int = 0
     /** フロントカメラかどうか (プレビューのミラーリングに影響) */
     private var isFrontCamera: Boolean = false
+    /** 現在のデバイスディスプレイ回転 (度数: 0, 90, 180, 270) */
+    @Volatile
+    private var displayRotationDegrees: Int = 0
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     @androidx.camera.core.ExperimentalZeroShutterLag
@@ -527,14 +530,16 @@ class CameraController(private val context: Context) {
         val sw = bounds.width().toFloat() / sensorW
         val sh = bounds.height().toFloat() / sensorH
 
-        // センサー回転角度に応じてプレビュー座標に変換
+        // センサー回転角度とディスプレイ回転を合成してプレビュー座標に変換
         // SENSOR_ORIENTATION は「出力画像を正立させるための CW 回転角度」
-        // CW 90°: (x,y)→(1-y, x)  CW 270°: (x,y)→(y, 1-x)
+        // displayRotationDegrees は端末の現在の向き (0=縦, 90=横右, etc.)
+        // 実効回転 = (sensorOrientation - displayRotation + 360) % 360
+        val effectiveRotation = (sensorOrientation - displayRotationDegrees + 360) % 360
         var vx: Float
         var vy: Float
         var vw: Float
         var vh: Float
-        when (sensorOrientation) {
+        when (effectiveRotation) {
             90 -> {
                 vx = 1f - sy; vy = sx; vw = sh; vh = sw
             }
@@ -601,6 +606,12 @@ class CameraController(private val context: Context) {
                     else -> Surface.ROTATION_90
                 }
                 imageCapture?.targetRotation = rotation
+                displayRotationDegrees = when (rotation) {
+                    Surface.ROTATION_90 -> 90
+                    Surface.ROTATION_180 -> 180
+                    Surface.ROTATION_270 -> 270
+                    else -> 0
+                }
             }
         }
         orientationListener?.enable()

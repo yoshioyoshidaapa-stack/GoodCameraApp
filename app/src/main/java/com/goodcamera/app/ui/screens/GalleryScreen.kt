@@ -77,6 +77,7 @@ fun GalleryScreen(
             photos = photos,
             initialIndex = selectedIndex,
             onBack = { selectedIndex = -1 },
+            onNavigateToCamera = onBack,
             onDelete = { item ->
                 context.contentResolver.delete(item.uri, null, null)
                 photos = photos.filter { it.id != item.id }
@@ -209,17 +210,29 @@ private fun PhotoDetailScreen(
     photos: List<GalleryItem>,
     initialIndex: Int,
     onBack: () -> Unit,
+    onNavigateToCamera: () -> Unit,
     onDelete: (GalleryItem) -> Unit,
     onShare: (GalleryItem) -> Unit,
 ) {
+    // ページ0を撮影モードへの遷移用仮想ページとして確保し、写真は1始まりにする
     val pagerState = rememberPagerState(
-        initialPage = initialIndex,
-        pageCount = { photos.size },
+        initialPage = initialIndex + 1,
+        pageCount = { photos.size + 1 },
     )
-    val currentItem = photos.getOrNull(pagerState.currentPage) ?: return
+
+    // 仮想ページ(0)に到達したら撮影モードに戻る
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }
+            .collect { page ->
+                if (page == 0) onNavigateToCamera()
+            }
+    }
+
+    val photoIndex = pagerState.currentPage - 1
+    val currentItem = photos.getOrNull(photoIndex)
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    if (showDeleteDialog) {
+    if (showDeleteDialog && currentItem != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("写真を削除") },
@@ -245,25 +258,31 @@ private fun PhotoDetailScreen(
             .fillMaxSize()
             .background(Color.Black),
     ) {
-        // スワイプ可能なページャー
+        // スワイプ可能なページャー (ページ0=仮想, ページ1+=写真)
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
-            key = { photos[it].id },
+            key = { if (it == 0) -1L else photos[it - 1].id },
         ) { page ->
-            ZoomableImage(item = photos[page])
+            if (page == 0) {
+                Box(modifier = Modifier.fillMaxSize())
+            } else {
+                ZoomableImage(item = photos[page - 1])
+            }
         }
 
-        // ページインジケーター
-        Text(
-            text = "${pagerState.currentPage + 1} / ${photos.size}",
-            color = Color.White.copy(alpha = 0.7f),
-            fontSize = 13.sp,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 16.dp),
-        )
+        // ページインジケーター (仮想ページでは非表示)
+        if (photoIndex >= 0) {
+            Text(
+                text = "${photoIndex + 1} / ${photos.size}",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp),
+            )
+        }
 
         // 上部バー
         Row(
@@ -277,12 +296,14 @@ private fun PhotoDetailScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.Filled.ArrowBack, "戻る", tint = Color.White)
             }
-            Row {
-                IconButton(onClick = { onShare(currentItem) }) {
-                    Icon(Icons.Filled.Share, "共有", tint = Color.White)
-                }
-                IconButton(onClick = { showDeleteDialog = true }) {
-                    Icon(Icons.Filled.Delete, "削除", tint = Color.White)
+            if (currentItem != null) {
+                Row {
+                    IconButton(onClick = { onShare(currentItem) }) {
+                        Icon(Icons.Filled.Share, "共有", tint = Color.White)
+                    }
+                    IconButton(onClick = { showDeleteDialog = true }) {
+                        Icon(Icons.Filled.Delete, "削除", tint = Color.White)
+                    }
                 }
             }
         }

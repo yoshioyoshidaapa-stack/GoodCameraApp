@@ -441,8 +441,135 @@ class CameraController(private val context: Context) {
     }
 
     /**
-     * カメラハードウェアから性能情報を取得し、UIに通知する。
+     * Proモード: ISO感度を設定する。
+     * AE_MODE を OFF にし、手動で SENSOR_SENSITIVITY を設定する。
      */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun setIso(iso: Int) {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            .setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, iso)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Pro: ISO=$iso")
+    }
+
+    /**
+     * Proモード: シャッタースピードを設定する。
+     * AE_MODE を OFF にし、手動で SENSOR_EXPOSURE_TIME を設定する。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun setShutterSpeed(ns: Long) {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            .setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, ns)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Pro: shutterSpeed=${ns}ns")
+    }
+
+    /**
+     * Proモード: ホワイトバランスを設定する。
+     * kelvin=0 の場合は AWB_MODE_AUTO、それ以外は AWB_MODE_OFF + COLOR_CORRECTION_GAINS。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun setWhiteBalance(kelvin: Int) {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        if (kelvin == 0) {
+            val options = CaptureRequestOptions.Builder()
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_AUTO,
+                )
+                .build()
+            camera2Control.setCaptureRequestOptions(options)
+        } else {
+            val options = CaptureRequestOptions.Builder()
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_OFF,
+                )
+                .setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_MODE,
+                    android.hardware.camera2.CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
+                )
+                .build()
+            camera2Control.setCaptureRequestOptions(options)
+        }
+        Log.d(TAG, "Pro: WB kelvin=$kelvin")
+    }
+
+    /**
+     * Proモード: 自動露出を有効に戻す。
+     * AE_MODE を ON_AUTO_FLASH に戻し、手動のISO/SSを解除する。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun enableAutoExposure() {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_MODE,
+                CaptureRequest.CONTROL_AE_MODE_ON,
+            )
+            .clearCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY)
+            .clearCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Pro: auto exposure restored")
+    }
+
+    /**
+     * Proモード: オートフォーカスを有効に戻す。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun enableAutoFocus() {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+            )
+            .clearCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Pro: auto focus restored")
+    }
+
+    /**
+     * Proモード終了: 全てのCamera2手動設定をクリアしてAutoに戻す。
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    fun resetToAuto() {
+        val cam = camera ?: return
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_MODE,
+                CaptureRequest.CONTROL_AE_MODE_ON,
+            )
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE,
+            )
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AWB_MODE,
+                CaptureRequest.CONTROL_AWB_MODE_AUTO,
+            )
+            .clearCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY)
+            .clearCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME)
+            .clearCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Pro: reset to full auto")
+    }
+
     /**
      * 露出補正インデックスを設定する。
      */
@@ -584,11 +711,45 @@ class CameraController(private val context: Context) {
             val evRangeRaw = cam.cameraInfo.exposureState.exposureCompensationRange
             val evMin: Int = evRangeRaw.lower
             val evMax: Int = evRangeRaw.upper
+
+            // ISO レンジ
+            val sensorRange = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE,
+            )
+            val isoRange = if (sensorRange != null) {
+                sensorRange.lower..sensorRange.upper
+            } else {
+                100..3200
+            }
+            // 標準ISO値に絞り込み
+            val standardIsos = listOf(50, 100, 200, 400, 800, 1600, 3200, 6400, 12800)
+            val supportedIsos = standardIsos.filter { it in isoRange }
+                .ifEmpty { listOf(100, 200, 400, 800, 1600, 3200) }
+
+            // シャッタースピードレンジ
+            val exposureTimeRange = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE,
+            )
+            val shutterSpeedRange = if (exposureTimeRange != null) {
+                exposureTimeRange.lower..exposureTimeRange.upper
+            } else {
+                1_000_000L..1_000_000_000L
+            }
+
+            val supportsRaw = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES,
+            )?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW) == true
+
             val capabilities = CameraCapabilities(
+                isoRange = isoRange,
+                shutterSpeedRangeNs = shutterSpeedRange,
                 minFocusDistance = minFocus,
+                supportsRaw = supportsRaw,
+                supportedIsos = supportedIsos,
                 exposureCompensationRange = evMin..evMax,
             )
-            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evMin..$evMax")
+            Log.d(TAG, "Camera capabilities: minFocusDistance=$minFocus, evRange=$evMin..$evMax, " +
+                "isoRange=$isoRange, shutterRange=$shutterSpeedRange, raw=$supportsRaw")
             onCapabilitiesReady?.invoke(capabilities)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to query camera capabilities", e)

@@ -52,6 +52,7 @@ import com.goodcamera.app.camera.GridType
 import com.goodcamera.app.camera.NormalizedFace
 import com.goodcamera.app.ui.components.GridOverlay
 import com.goodcamera.app.ui.components.ModeSelectorBar
+import com.goodcamera.app.ui.components.ProControlsPanel
 import com.goodcamera.app.ui.viewmodel.CameraViewModel
 
 @Composable
@@ -294,9 +295,9 @@ fun CameraScreen(
             }
         }
 
-        // 左側: 縦の露出補正スライダー
+        // 左側: 縦の露出補正スライダー (Proモードでは非表示 — ProControlsPanel内にEV制御あり)
         val evRange = uiState.capabilities.exposureCompensationRange
-        if (evRange.first < evRange.last) {
+        if (evRange.first < evRange.last && uiState.captureMode != CaptureMode.PRO) {
             VerticalEvSlider(
                 ev = uiState.settings.exposureCompensation,
                 evRange = evRange,
@@ -317,6 +318,22 @@ fun CameraScreen(
                 .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // Proモード制御パネル
+            if (uiState.captureMode == CaptureMode.PRO) {
+                ProControlsPanel(
+                    settings = uiState.settings,
+                    capabilities = uiState.capabilities,
+                    onIsoChanged = { viewModel.setIso(it) },
+                    onShutterSpeedChanged = { viewModel.setShutterSpeed(it) },
+                    onWhiteBalanceChanged = { viewModel.setWhiteBalance(it) },
+                    onFocusDistanceChanged = { viewModel.setFocusDistance(it) },
+                    onAutoExposureChanged = { viewModel.setAutoExposure(it) },
+                    onAutoFocusChanged = { viewModel.setAutoFocus(it) },
+                    onExposureCompChanged = { viewModel.setExposureCompensation(it) },
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+
             // モード選択バー
             ModeSelectorBar(
                 currentMode = uiState.captureMode,
@@ -324,8 +341,8 @@ fun CameraScreen(
                 modifier = Modifier.padding(bottom = 12.dp),
             )
 
-            // フォーカススライダー (全モード共通)
-            if (uiState.capabilities.minFocusDistance > 0f) {
+            // フォーカススライダー (Proモードでは非表示 — ProControlsPanel内にMF制御あり)
+            if (uiState.capabilities.minFocusDistance > 0f && uiState.captureMode != CaptureMode.PRO) {
                 val isMacro = uiState.isMacroActive
                 FocusSlider(
                     focusDistance = if (isMacro) uiState.macroFocusDistance else uiState.settings.focusDistance,

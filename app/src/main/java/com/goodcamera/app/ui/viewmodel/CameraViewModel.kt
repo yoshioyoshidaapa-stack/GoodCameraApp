@@ -188,6 +188,29 @@ class CameraViewModel : ViewModel() {
         } else if (mode != CaptureMode.AI_AUTO && prev == CaptureMode.AI_AUTO) {
             stopAiAnalysisLoop()
         }
+
+        // Proモードの切り替え → 手動設定の適用/解除
+        if (mode == CaptureMode.PRO && prev != CaptureMode.PRO) {
+            // Proモード開始: 現在の設定を適用
+            val settings = _uiState.value.settings
+            if (!settings.autoExposure) {
+                cameraController?.setIso(settings.iso)
+                cameraController?.setShutterSpeed(settings.shutterSpeedNs)
+            }
+            if (settings.whiteBalance != WhiteBalanceMode.AUTO) {
+                cameraController?.setWhiteBalance(settings.whiteBalance.kelvin)
+            }
+        } else if (mode != CaptureMode.PRO && prev == CaptureMode.PRO) {
+            // Proモード終了: 全てAutoに戻す
+            cameraController?.resetToAuto()
+            _uiState.update { it.copy(
+                settings = it.settings.copy(
+                    autoExposure = true,
+                    autoFocus = true,
+                    whiteBalance = WhiteBalanceMode.AUTO,
+                ),
+            ) }
+        }
     }
 
     /**
@@ -268,6 +291,54 @@ class CameraViewModel : ViewModel() {
             settings = it.settings.copy(focusDistance = distance, autoFocus = false),
         ) }
         cameraController?.setManualFocusDistance(distance)
+    }
+
+    // --- Pro モード設定 ---
+
+    fun setIso(iso: Int) {
+        _uiState.update { it.copy(
+            settings = it.settings.copy(iso = iso, autoExposure = false),
+        ) }
+        cameraController?.setIso(iso)
+    }
+
+    fun setShutterSpeed(ns: Long) {
+        _uiState.update { it.copy(
+            settings = it.settings.copy(shutterSpeedNs = ns, autoExposure = false),
+        ) }
+        cameraController?.setShutterSpeed(ns)
+    }
+
+    fun setWhiteBalance(mode: WhiteBalanceMode) {
+        _uiState.update { it.copy(
+            settings = it.settings.copy(whiteBalance = mode),
+        ) }
+        cameraController?.setWhiteBalance(mode.kelvin)
+    }
+
+    fun setAutoExposure(enabled: Boolean) {
+        _uiState.update { it.copy(
+            settings = it.settings.copy(autoExposure = enabled),
+        ) }
+        if (enabled) {
+            cameraController?.enableAutoExposure()
+        } else {
+            // 手動に切り替え: 現在のISO/SSを適用
+            val settings = _uiState.value.settings
+            cameraController?.setIso(settings.iso)
+            cameraController?.setShutterSpeed(settings.shutterSpeedNs)
+        }
+    }
+
+    fun setAutoFocus(enabled: Boolean) {
+        _uiState.update { it.copy(
+            settings = it.settings.copy(autoFocus = enabled),
+        ) }
+        if (enabled) {
+            cameraController?.enableAutoFocus()
+        } else {
+            cameraController?.setManualFocusDistance(_uiState.value.settings.focusDistance)
+        }
     }
 
     fun setGridType(type: GridType) {

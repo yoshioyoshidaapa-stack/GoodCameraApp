@@ -33,7 +33,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
-import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -133,7 +132,7 @@ class CameraController(private val context: Context) {
                             if (faceDetectionEnabled) {
                                 val faces = result.get(CaptureResult.STATISTICS_FACES)
                                 val activeRect = sensorActiveRect
-                                if (faces != null && faces.isNotEmpty() && activeRect != null) {
+                                if (!faces.isNullOrEmpty() && activeRect != null) {
                                     val detected = faces.mapNotNull { face ->
                                         convertFaceToNormalized(face, activeRect)
                                     }

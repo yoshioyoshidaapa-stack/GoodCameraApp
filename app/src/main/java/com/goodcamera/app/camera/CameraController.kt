@@ -553,9 +553,15 @@ class CameraController(private val context: Context) {
             }
         }
 
-        // フロントカメラはプレビューがX軸ミラーリングされている
+        // フロントカメラはプレビューがミラーリングされている。
+        // ミラー軸はディスプレイ回転に依存する:
+        //   縦位置 (0°/180°) → X軸ミラー, 横位置 (90°/270°) → Y軸ミラー
         if (isFrontCamera) {
-            vx = 1f - vx
+            if (displayRotationDegrees == 90 || displayRotationDegrees == 270) {
+                vy = 1f - vy
+            } else {
+                vx = 1f - vx
+            }
         }
 
         return DetectedFace(

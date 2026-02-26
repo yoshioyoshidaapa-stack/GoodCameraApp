@@ -198,7 +198,7 @@ class CameraViewModel : ViewModel() {
                 cameraController?.setShutterSpeed(settings.shutterSpeedNs)
             }
             if (settings.whiteBalance != WhiteBalanceMode.AUTO) {
-                cameraController?.setWhiteBalance(settings.whiteBalance.kelvin)
+                cameraController?.setWhiteBalance(settings.whiteBalance)
             }
         } else if (mode != CaptureMode.PRO && prev == CaptureMode.PRO) {
             // Proモード終了: 全てAutoに戻す
@@ -313,7 +313,7 @@ class CameraViewModel : ViewModel() {
         _uiState.update { it.copy(
             settings = it.settings.copy(whiteBalance = mode),
         ) }
-        cameraController?.setWhiteBalance(mode.kelvin)
+        cameraController?.setWhiteBalance(mode)
     }
 
     fun setAutoExposure(enabled: Boolean) {

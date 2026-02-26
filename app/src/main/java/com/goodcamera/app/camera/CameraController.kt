@@ -474,34 +474,25 @@ class CameraController(private val context: Context) {
 
     /**
      * Proモード: ホワイトバランスを設定する。
-     * kelvin=0 の場合は AWB_MODE_AUTO、それ以外は AWB_MODE_OFF + COLOR_CORRECTION_GAINS。
+     * Camera2のビルトインAWBプリセットにマッピングする。
      */
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
-    fun setWhiteBalance(kelvin: Int) {
+    fun setWhiteBalance(mode: WhiteBalanceMode) {
         val cam = camera ?: return
         val camera2Control = Camera2CameraControl.from(cam.cameraControl)
-        if (kelvin == 0) {
-            val options = CaptureRequestOptions.Builder()
-                .setCaptureRequestOption(
-                    CaptureRequest.CONTROL_AWB_MODE,
-                    CaptureRequest.CONTROL_AWB_MODE_AUTO,
-                )
-                .build()
-            camera2Control.setCaptureRequestOptions(options)
-        } else {
-            val options = CaptureRequestOptions.Builder()
-                .setCaptureRequestOption(
-                    CaptureRequest.CONTROL_AWB_MODE,
-                    CaptureRequest.CONTROL_AWB_MODE_OFF,
-                )
-                .setCaptureRequestOption(
-                    CaptureRequest.COLOR_CORRECTION_MODE,
-                    android.hardware.camera2.CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
-                )
-                .build()
-            camera2Control.setCaptureRequestOptions(options)
+        val awbMode = when (mode) {
+            WhiteBalanceMode.AUTO -> CaptureRequest.CONTROL_AWB_MODE_AUTO
+            WhiteBalanceMode.DAYLIGHT -> CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT
+            WhiteBalanceMode.CLOUDY -> CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
+            WhiteBalanceMode.TUNGSTEN -> CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT
+            WhiteBalanceMode.FLUORESCENT -> CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT
+            WhiteBalanceMode.SHADE -> CaptureRequest.CONTROL_AWB_MODE_SHADE
         }
-        Log.d(TAG, "Pro: WB kelvin=$kelvin")
+        val options = CaptureRequestOptions.Builder()
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, awbMode)
+            .build()
+        camera2Control.setCaptureRequestOptions(options)
+        Log.d(TAG, "Pro: WB=${mode.label} (awbMode=$awbMode)")
     }
 
     /**

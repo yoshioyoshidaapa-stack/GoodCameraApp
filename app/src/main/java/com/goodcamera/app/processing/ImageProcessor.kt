@@ -133,7 +133,8 @@ object ImageProcessor {
     fun processNight(stackedBitmap: Bitmap): Bitmap {
         return process(stackedBitmap, ProcessingConfig(
             denoiseEnabled = true,
-            denoiseStrength = DenoiseStrength.STRONG,
+            denoiseStrength = DenoiseStrength.MEDIUM, // スタッキングでノイズ低減済みのためMEDIUMで十分
+            deblurEnabled = false, // スタッキングでランダムノイズは平均化済み、デブラー不要
             sharpenEnabled = true,
             sharpenAmount = 1.5f, // ノイズ除去で失われたエッジを回復
             autoLevelsEnabled = true,

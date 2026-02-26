@@ -70,7 +70,7 @@ data class CameraUiState(
     val errorMessage: String? = null,
     val usingFrontCamera: Boolean = false,
     val hdrFrameCount: Int = 3,
-    val nightFrameCount: Int = 8,
+    val nightFrameCount: Int = 5,
     val showReviewScreen: Boolean = false,
     val reviewImagePath: String? = null,
     val autoContrastEnabled: Boolean = true,

@@ -147,7 +147,7 @@ fun CameraScreen(
 
                                 // 250ms以内にリリース → タップ判定
                                 var releasedBeforeTimeout = false
-                                kotlinx.coroutines.withTimeoutOrNull(250L) {
+                                withTimeoutOrNull(250L) {
                                     do {
                                         val event = awaitPointerEvent()
                                         if (event.changes.none { it.pressed }) {

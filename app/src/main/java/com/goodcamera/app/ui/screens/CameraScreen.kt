@@ -598,7 +598,7 @@ private fun VerticalEvSlider(
                 .weight(1f),
             contentAlignment = Alignment.Center,
         ) {
-            val sliderLength = maxHeight
+            val sliderLength = this.maxHeight
             Slider(
                 value = ev.toFloat(),
                 onValueChange = { onEvChanged(it.toInt()) },
@@ -640,8 +640,8 @@ private fun VerticalEvSlider(
 private fun FocusLoupe(
     previewBitmap: ImageBitmap,
     touchPosition: Offset,
-    magnification: Float = 3f,
     modifier: Modifier = Modifier,
+    magnification: Float = 3f,
 ) {
     val density = LocalDensity.current
     val loupeRadiusPx = with(density) { 100.dp.toPx() }

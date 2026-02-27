@@ -139,25 +139,44 @@ fun CameraScreen(
                 .fillMaxSize()
                 .pointerInput(isManualFocus) {
                     if (isManualFocus) {
-                        // MF時: タッチ＆ホールドでルーペ表示
+                        // MF時: タップ → AF復帰+タップフォーカス、長押し → ルーペ表示
                         awaitPointerEventScope {
                             while (true) {
                                 val down = awaitFirstDown()
-                                loupePosition = down.position
+                                val downPos = down.position
 
-                                var pressed = true
-                                while (pressed) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull()
-                                    if (change != null && change.pressed) {
-                                        loupePosition = change.position
-                                        change.consume()
-                                    } else {
-                                        pressed = false
-                                    }
+                                // 250ms以内にリリース → タップ判定
+                                var releasedBeforeTimeout = false
+                                kotlinx.coroutines.withTimeoutOrNull(250L) {
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        if (event.changes.none { it.pressed }) {
+                                            releasedBeforeTimeout = true
+                                        }
+                                    } while (!releasedBeforeTimeout)
                                 }
 
-                                loupePosition = null
+                                if (releasedBeforeTimeout) {
+                                    // タップ → AFに戻してフォーカス
+                                    focusTapPosition = downPos
+                                    viewModel.tapToFocus(previewView, downPos.x, downPos.y)
+                                } else {
+                                    // 長押し → ルーペ表示
+                                    loupePosition = downPos
+
+                                    var pressed = true
+                                    while (pressed) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull()
+                                        if (change != null && change.pressed) {
+                                            loupePosition = change.position
+                                            change.consume()
+                                        } else {
+                                            pressed = false
+                                        }
+                                    }
+                                    loupePosition = null
+                                }
                             }
                         }
                     } else {

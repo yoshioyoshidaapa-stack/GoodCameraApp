@@ -625,7 +625,7 @@ private fun FocusLoupe(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
-    val loupeRadiusPx = with(density) { 75.dp.toPx() }
+    val loupeRadiusPx = with(density) { 100.dp.toPx() }
     val borderWidthPx = with(density) { 2.dp.toPx() }
     val crosshairPx = with(density) { 8.dp.toPx() }
 

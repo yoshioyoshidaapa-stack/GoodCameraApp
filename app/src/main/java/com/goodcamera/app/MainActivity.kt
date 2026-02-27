@@ -63,6 +63,7 @@ private fun CameraAppContent() {
             AppScreen.GALLERY -> {
                 GalleryScreen(
                     onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
+                    startWithLatestPhoto = true,
                 )
             }
             AppScreen.SETTINGS -> {

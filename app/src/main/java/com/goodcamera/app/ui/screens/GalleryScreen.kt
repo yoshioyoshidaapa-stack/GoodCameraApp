@@ -52,10 +52,14 @@ data class GalleryItem(
 
 /**
  * ギャラリー画面 - GoodCameraで撮影した写真を一覧表示
+ *
+ * @param startWithLatestPhoto true の場合、最新の写真をフルスクリーンで表示して開始する。
+ *        ピンチアウトでグリッド一覧に遷移する。
  */
 @Composable
 fun GalleryScreen(
     onBack: () -> Unit,
+    startWithLatestPhoto: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -69,6 +73,10 @@ fun GalleryScreen(
             loadGoodCameraPhotos(context)
         }
         isLoading = false
+        // 最新写真プレビューモード: 読み込み完了後に最新写真を表示
+        if (startWithLatestPhoto && photos.isNotEmpty()) {
+            selectedIndex = 0
+        }
     }
 
     // 写真の詳細表示（スワイプ対応）
@@ -76,8 +84,16 @@ fun GalleryScreen(
         PhotoDetailScreen(
             photos = photos,
             initialIndex = selectedIndex,
-            onBack = { selectedIndex = -1 },
+            onBack = {
+                if (startWithLatestPhoto && selectedIndex == 0) {
+                    // 最新写真プレビューから戻る → カメラに戻る
+                    onBack()
+                } else {
+                    selectedIndex = -1
+                }
+            },
             onNavigateToCamera = onBack,
+            onPinchOut = { selectedIndex = -1 },
             onDelete = { item ->
                 context.contentResolver.delete(item.uri, null, null)
                 photos = photos.filter { it.id != item.id }
@@ -211,6 +227,7 @@ private fun PhotoDetailScreen(
     initialIndex: Int,
     onBack: () -> Unit,
     onNavigateToCamera: () -> Unit,
+    onPinchOut: () -> Unit,
     onDelete: (GalleryItem) -> Unit,
     onShare: (GalleryItem) -> Unit,
 ) {
@@ -267,7 +284,10 @@ private fun PhotoDetailScreen(
             if (page == 0) {
                 Box(modifier = Modifier.fillMaxSize())
             } else {
-                ZoomableImage(item = photos[page - 1])
+                ZoomableImage(
+                    item = photos[page - 1],
+                    onPinchOut = onPinchOut,
+                )
             }
         }
 
@@ -312,9 +332,15 @@ private fun PhotoDetailScreen(
 
 /**
  * ピンチズーム・パン対応の画像表示
+ *
+ * @param onPinchOut ピンチアウト（縮小方向）でスケールが閾値を下回った時のコールバック。
+ *        ギャラリーグリッドへの遷移に使用する。
  */
 @Composable
-private fun ZoomableImage(item: GalleryItem) {
+private fun ZoomableImage(
+    item: GalleryItem,
+    onPinchOut: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
@@ -333,12 +359,14 @@ private fun ZoomableImage(item: GalleryItem) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+    var pinchOutTriggered by remember { mutableStateOf(false) }
 
     // ページ切り替え時にズームをリセット
     LaunchedEffect(item.id) {
         scale = 1f
         offsetX = 0f
         offsetY = 0f
+        pinchOutTriggered = false
     }
 
     Box(
@@ -347,16 +375,23 @@ private fun ZoomableImage(item: GalleryItem) {
             .pointerInput(item.id) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
+                    pinchOutTriggered = false
                     do {
                         val event = awaitPointerEvent()
                         val zoomChange = event.calculateZoom()
                         val panChange = event.calculatePan()
 
                         if (zoomChange != 1f) {
-                            // ピンチズーム（2本指）: 常に処理してイベント消費
-                            val newScale = (scale * zoomChange).coerceIn(1f, 5f)
+                            // ピンチズーム（2本指）: 縮小方向も許可 (0.4f まで)
+                            val newScale = (scale * zoomChange).coerceIn(0.4f, 5f)
                             scale = newScale
                             event.changes.forEach { it.consume() }
+
+                            // ピンチアウト検出: スケールが閾値以下でコールバック
+                            if (onPinchOut != null && newScale <= 0.6f && !pinchOutTriggered) {
+                                pinchOutTriggered = true
+                                onPinchOut()
+                            }
                         }
 
                         if (scale > 1f) {
@@ -367,11 +402,16 @@ private fun ZoomableImage(item: GalleryItem) {
                             offsetY = (offsetY + panChange.y).coerceIn(-maxY, maxY)
                             event.changes.forEach { it.consume() }
                         } else {
-                            // 等倍時: イベント消費しない → HorizontalPagerのスワイプが有効
+                            // 等倍以下: パンリセット
                             offsetX = 0f
                             offsetY = 0f
                         }
                     } while (event.changes.any { it.pressed })
+
+                    // ジェスチャー終了: 等倍未満なら1fにスナップバック
+                    if (scale < 1f) {
+                        scale = 1f
+                    }
                 }
             },
         contentAlignment = Alignment.Center,

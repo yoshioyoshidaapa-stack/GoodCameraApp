@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -35,10 +36,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +83,25 @@ fun CameraScreen(
     val focusRingScale = remember { Animatable(1.5f) }
     var focusRingColor by remember { mutableStateOf(Color.White) }
 
+    // フォーカスルーペ状態
+    var loupePosition by remember { mutableStateOf<Offset?>(null) }
+    var loupeImageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    val isManualFocus = !uiState.settings.autoFocus || uiState.isMacroActive
+
+    // ルーペ表示中はプレビュービットマップを定期更新
+    LaunchedEffect(loupePosition != null) {
+        if (loupePosition != null) {
+            while (true) {
+                val bmp = previewView.bitmap
+                if (bmp != null) {
+                    loupeImageBitmap = bmp.asImageBitmap()
+                }
+                kotlinx.coroutines.delay(150)
+            }
+        }
+        loupeImageBitmap = null
+    }
+
     // フォーカスロック完了でリングの色を変える
     LaunchedEffect(uiState.focusLocked) {
         if (focusTapPosition != null) {
@@ -111,10 +137,35 @@ fun CameraScreen(
             factory = { previewView },
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        focusTapPosition = offset
-                        viewModel.tapToFocus(previewView, offset.x, offset.y)
+                .pointerInput(isManualFocus) {
+                    if (isManualFocus) {
+                        // MF時: タッチ＆ホールドでルーペ表示
+                        awaitPointerEventScope {
+                            while (true) {
+                                val down = awaitFirstDown()
+                                loupePosition = down.position
+
+                                var pressed = true
+                                while (pressed) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull()
+                                    if (change != null && change.pressed) {
+                                        loupePosition = change.position
+                                        change.consume()
+                                    } else {
+                                        pressed = false
+                                    }
+                                }
+
+                                loupePosition = null
+                            }
+                        }
+                    } else {
+                        // AF時: タップフォーカス
+                        detectTapGestures { offset ->
+                            focusTapPosition = offset
+                            viewModel.tapToFocus(previewView, offset.x, offset.y)
+                        }
                     }
                 },
         )
@@ -133,6 +184,16 @@ fun CameraScreen(
                     style = Stroke(width = 2.dp.toPx()),
                 )
             }
+        }
+
+        // フォーカスルーペ (マニュアルフォーカス時)
+        val currentLoupeBitmap = loupeImageBitmap
+        val currentLoupePos = loupePosition
+        if (currentLoupeBitmap != null && currentLoupePos != null) {
+            FocusLoupe(
+                previewBitmap = currentLoupeBitmap,
+                touchPosition = currentLoupePos,
+            )
         }
 
         // 顔検出オーバーレイ
@@ -549,6 +610,112 @@ private fun VerticalEvSlider(
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 2.dp),
         )
+    }
+}
+
+/**
+ * フォーカスルーペ: タッチ位置周辺を円形に拡大表示する。
+ * 指の上方にオフセットして表示し、画面上端に近い場合は下方に切り替える。
+ */
+@Composable
+private fun FocusLoupe(
+    previewBitmap: ImageBitmap,
+    touchPosition: Offset,
+    magnification: Float = 3f,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val loupeRadiusPx = with(density) { 75.dp.toPx() }
+    val borderWidthPx = with(density) { 2.dp.toPx() }
+    val crosshairPx = with(density) { 8.dp.toPx() }
+
+    androidx.compose.foundation.Canvas(
+        modifier = modifier.fillMaxSize(),
+    ) {
+        val scaleX = previewBitmap.width.toFloat() / size.width
+        val scaleY = previewBitmap.height.toFloat() / size.height
+
+        // ソース領域 (ビットマップ座標)
+        val srcHalfW = (loupeRadiusPx * scaleX / magnification).toInt()
+        val srcHalfH = (loupeRadiusPx * scaleY / magnification).toInt()
+        val srcCenterX = (touchPosition.x * scaleX).toInt()
+        val srcCenterY = (touchPosition.y * scaleY).toInt()
+
+        // ルーペの表示位置 (指の上方、画面端ではクランプ or 下方にフリップ)
+        val loupeCenterX = touchPosition.x.coerceIn(loupeRadiusPx, size.width - loupeRadiusPx)
+        val aboveY = touchPosition.y - loupeRadiusPx * 2.5f
+        val belowY = touchPosition.y + loupeRadiusPx * 2.5f
+        val loupeCenterY = if (aboveY >= loupeRadiusPx + borderWidthPx) {
+            aboveY
+        } else {
+            belowY.coerceAtMost(size.height - loupeRadiusPx - borderWidthPx)
+        }
+
+        // 円形クリップパス
+        val circlePath = Path().apply {
+            addOval(
+                androidx.compose.ui.geometry.Rect(
+                    left = loupeCenterX - loupeRadiusPx,
+                    top = loupeCenterY - loupeRadiusPx,
+                    right = loupeCenterX + loupeRadiusPx,
+                    bottom = loupeCenterY + loupeRadiusPx,
+                ),
+            )
+        }
+
+        // ソース領域のクランプ
+        val srcLeft = (srcCenterX - srcHalfW).coerceAtLeast(0)
+        val srcTop = (srcCenterY - srcHalfH).coerceAtLeast(0)
+        val srcW = (srcHalfW * 2).coerceAtMost(previewBitmap.width - srcLeft)
+        val srcH = (srcHalfH * 2).coerceAtMost(previewBitmap.height - srcTop)
+
+        if (srcW > 0 && srcH > 0) {
+            // 半透明の背景円
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.5f),
+                radius = loupeRadiusPx + borderWidthPx,
+                center = Offset(loupeCenterX, loupeCenterY),
+            )
+
+            // 拡大画像を円形にクリップして描画
+            clipPath(circlePath) {
+                drawImage(
+                    image = previewBitmap,
+                    srcOffset = IntOffset(srcLeft, srcTop),
+                    srcSize = IntSize(srcW, srcH),
+                    dstOffset = IntOffset(
+                        (loupeCenterX - loupeRadiusPx).toInt(),
+                        (loupeCenterY - loupeRadiusPx).toInt(),
+                    ),
+                    dstSize = IntSize(
+                        (loupeRadiusPx * 2).toInt(),
+                        (loupeRadiusPx * 2).toInt(),
+                    ),
+                )
+            }
+
+            // 白枠
+            drawCircle(
+                color = Color.White,
+                radius = loupeRadiusPx,
+                center = Offset(loupeCenterX, loupeCenterY),
+                style = Stroke(width = borderWidthPx),
+            )
+
+            // 十字線
+            drawLine(
+                Color.White.copy(alpha = 0.6f),
+                Offset(loupeCenterX - crosshairPx, loupeCenterY),
+                Offset(loupeCenterX + crosshairPx, loupeCenterY),
+                strokeWidth = 1f,
+            )
+            drawLine(
+                Color.White.copy(alpha = 0.6f),
+                Offset(loupeCenterX, loupeCenterY - crosshairPx),
+                Offset(loupeCenterX, loupeCenterY + crosshairPx),
+                strokeWidth = 1f,
+            )
+        }
     }
 }
 

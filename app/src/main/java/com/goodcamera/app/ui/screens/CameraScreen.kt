@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -86,8 +85,6 @@ fun CameraScreen(
     // フォーカスルーペ状態
     var loupePosition by remember { mutableStateOf<Offset?>(null) }
     var loupeImageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-    val isManualFocus = !uiState.settings.autoFocus || uiState.isMacroActive
-
     // ルーペ表示中はプレビュービットマップを定期更新
     LaunchedEffect(loupePosition != null) {
         if (loupePosition != null) {
@@ -137,53 +134,45 @@ fun CameraScreen(
             factory = { previewView },
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(isManualFocus) {
-                    if (isManualFocus) {
-                        // MF時: タップ → AF復帰+タップフォーカス、長押し → ルーペ表示
-                        awaitPointerEventScope {
-                            while (true) {
-                                val down = awaitFirstDown()
-                                val downPos = down.position
+                .pointerInput(Unit) {
+                    // タップ → タップフォーカス、長押し → ルーペ表示
+                    awaitPointerEventScope {
+                        while (true) {
+                            val down = awaitFirstDown()
+                            val downPos = down.position
 
-                                // 250ms以内にリリース → タップ判定
-                                var releasedBeforeTimeout = false
-                                withTimeoutOrNull(250L) {
-                                    do {
-                                        val event = awaitPointerEvent()
-                                        if (event.changes.none { it.pressed }) {
-                                            releasedBeforeTimeout = true
-                                        }
-                                    } while (!releasedBeforeTimeout)
-                                }
-
-                                if (releasedBeforeTimeout) {
-                                    // タップ → AFに戻してフォーカス
-                                    focusTapPosition = downPos
-                                    viewModel.tapToFocus(previewView, downPos.x, downPos.y)
-                                } else {
-                                    // 長押し → ルーペ表示
-                                    loupePosition = downPos
-
-                                    var pressed = true
-                                    while (pressed) {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull()
-                                        if (change != null && change.pressed) {
-                                            loupePosition = change.position
-                                            change.consume()
-                                        } else {
-                                            pressed = false
-                                        }
+                            // 250ms以内にリリース → タップ判定
+                            var releasedBeforeTimeout = false
+                            withTimeoutOrNull(250L) {
+                                do {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.none { it.pressed }) {
+                                        releasedBeforeTimeout = true
                                     }
-                                    loupePosition = null
-                                }
+                                } while (!releasedBeforeTimeout)
                             }
-                        }
-                    } else {
-                        // AF時: タップフォーカス
-                        detectTapGestures { offset ->
-                            focusTapPosition = offset
-                            viewModel.tapToFocus(previewView, offset.x, offset.y)
+
+                            if (releasedBeforeTimeout) {
+                                // タップ → フォーカス
+                                focusTapPosition = downPos
+                                viewModel.tapToFocus(previewView, downPos.x, downPos.y)
+                            } else {
+                                // 長押し → ルーペ表示
+                                loupePosition = downPos
+
+                                var pressed = true
+                                while (pressed) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull()
+                                    if (change != null && change.pressed) {
+                                        loupePosition = change.position
+                                        change.consume()
+                                    } else {
+                                        pressed = false
+                                    }
+                                }
+                                loupePosition = null
+                            }
                         }
                     }
                 },

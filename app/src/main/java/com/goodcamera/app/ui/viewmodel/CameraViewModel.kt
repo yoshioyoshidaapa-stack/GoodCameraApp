@@ -1,11 +1,12 @@
 package com.goodcamera.app.ui.viewmodel
 
+import android.app.Application
 import android.content.Context
 import android.media.MediaActionSound
 import android.util.Log
 import androidx.camera.view.PreviewView
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.goodcamera.app.camera.*
 import com.goodcamera.app.processing.FrameStacker
@@ -23,17 +24,25 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
-class CameraViewModel : ViewModel() {
+class CameraViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val TAG = "CameraViewModel"
+        private const val PREFS_NAME = "good_camera_prefs"
+        private const val KEY_SHUTTER_SOUND = "shutter_sound_enabled"
         /** 顔フォーカスの最小間隔 (ms) — チラつき防止 */
         private const val FACE_FOCUS_THROTTLE_MS = 1500L
         /** 顔位置が大きく動いた時のみ再フォーカスする閾値 (正規化座標) */
         private const val FACE_MOVE_THRESHOLD = 0.08f
     }
 
-    private val _uiState = MutableStateFlow(CameraUiState())
+    private val prefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private val _uiState = MutableStateFlow(
+        CameraUiState(
+            shutterSoundEnabled = prefs.getBoolean(KEY_SHUTTER_SOUND, true),
+        )
+    )
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
     private var cameraController: CameraController? = null
@@ -355,6 +364,7 @@ class CameraViewModel : ViewModel() {
 
     fun setShutterSoundEnabled(enabled: Boolean) {
         _uiState.update { it.copy(shutterSoundEnabled = enabled) }
+        prefs.edit().putBoolean(KEY_SHUTTER_SOUND, enabled).apply()
     }
 
     fun navigateTo(screen: AppScreen) {

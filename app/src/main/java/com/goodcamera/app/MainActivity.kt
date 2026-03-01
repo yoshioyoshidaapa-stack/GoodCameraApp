@@ -70,6 +70,8 @@ private fun CameraAppContent() {
                 SettingsScreen(
                     gridType = uiState.gridType,
                     onGridTypeChanged = { viewModel.setGridType(it) },
+                    shutterSoundEnabled = uiState.shutterSoundEnabled,
+                    onShutterSoundChanged = { viewModel.setShutterSoundEnabled(it) },
                     onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
                 )
             }

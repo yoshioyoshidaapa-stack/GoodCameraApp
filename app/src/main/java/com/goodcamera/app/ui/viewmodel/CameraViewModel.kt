@@ -1,6 +1,7 @@
 package com.goodcamera.app.ui.viewmodel
 
 import android.content.Context
+import android.media.MediaActionSound
 import android.util.Log
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
@@ -38,6 +39,9 @@ class CameraViewModel : ViewModel() {
     private var cameraController: CameraController? = null
     private var previewViewRef: PreviewView? = null
     private var aiAnalysisJob: Job? = null
+    private val shutterSound = MediaActionSound().apply {
+        load(MediaActionSound.SHUTTER_CLICK)
+    }
 
     // 顔フォーカスのスロットリング状態
     private var lastFaceFocusTime = 0L
@@ -101,6 +105,10 @@ class CameraViewModel : ViewModel() {
     fun capturePhoto() {
         if (_uiState.value.isCaptureInProgress) return
         _uiState.update { it.copy(isCaptureInProgress = true) }
+
+        if (_uiState.value.shutterSoundEnabled) {
+            shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+        }
 
         if (_uiState.value.captureMode == CaptureMode.NIGHT) {
             captureNightMode()
@@ -345,6 +353,10 @@ class CameraViewModel : ViewModel() {
         _uiState.update { it.copy(gridType = type) }
     }
 
+    fun setShutterSoundEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(shutterSoundEnabled = enabled) }
+    }
+
     fun navigateTo(screen: AppScreen) {
         _uiState.update { it.copy(currentScreen = screen) }
     }
@@ -429,5 +441,6 @@ class CameraViewModel : ViewModel() {
         super.onCleared()
         aiAnalysisJob?.cancel()
         cameraController?.release()
+        shutterSound.release()
     }
 }

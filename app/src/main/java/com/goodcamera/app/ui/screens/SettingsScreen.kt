@@ -21,6 +21,8 @@ import com.goodcamera.app.camera.GridType
 fun SettingsScreen(
     gridType: GridType,
     onGridTypeChanged: (GridType) -> Unit,
+    shutterSoundEnabled: Boolean,
+    onShutterSoundChanged: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -70,6 +72,19 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // シャッター音
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("シャッター音", color = Color.White, fontSize = 14.sp)
+                        Switch(
+                            checked = shutterSoundEnabled,
+                            onCheckedChange = onShutterSoundChanged,
+                        )
                     }
                 }
 

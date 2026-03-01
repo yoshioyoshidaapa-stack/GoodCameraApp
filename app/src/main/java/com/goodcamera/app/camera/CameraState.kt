@@ -100,6 +100,8 @@ data class CameraUiState(
     val faceDetectionActive: Boolean = false,
     val detectedFaces: List<NormalizedFace> = emptyList(),
     val faceFocusLocked: Boolean = false,
+    // Shutter Sound
+    val shutterSoundEnabled: Boolean = true,
 )
 
 /**

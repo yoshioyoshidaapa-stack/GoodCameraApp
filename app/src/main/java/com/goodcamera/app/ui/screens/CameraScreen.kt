@@ -99,13 +99,7 @@ fun CameraScreen(
         loupeImageBitmap = null
     }
 
-    // フォーカスロック完了でリングの色を変える
-    LaunchedEffect(uiState.focusLocked) {
-        if (focusTapPosition != null) {
-            focusRingColor = if (uiState.focusLocked) Color.Green else Color.Yellow
-        }
-    }
-
+    // フォーカスリングのアニメーション
     LaunchedEffect(focusTapPosition) {
         if (focusTapPosition != null) {
             focusRingColor = Color.White
@@ -113,9 +107,17 @@ fun CameraScreen(
             focusRingScale.snapTo(1.4f)
             // 高速縮小 (150ms)
             focusRingScale.animateTo(1f, animationSpec = tween(150))
-            // フォーカスロック待ち → フェードアウト
-            kotlinx.coroutines.delay(800)
-            focusRingAlpha.animateTo(0f, animationSpec = tween(200))
+            // フォーカス結果を最大1.5秒待つ
+            var waited = 0L
+            while (!uiState.focusLocked && waited < 1500L) {
+                kotlinx.coroutines.delay(50)
+                waited += 50
+            }
+            // 結果に応じて色を変える
+            focusRingColor = if (uiState.focusLocked) Color.Green else Color.Yellow
+            // 色を見せてからフェードアウト
+            kotlinx.coroutines.delay(600)
+            focusRingAlpha.animateTo(0f, animationSpec = tween(300))
         }
     }
 

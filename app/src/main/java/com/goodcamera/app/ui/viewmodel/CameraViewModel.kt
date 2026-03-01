@@ -372,9 +372,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun tapToFocus(previewView: PreviewView, x: Float, y: Float) {
-        // マニュアルフォーカスからオートフォーカスに復帰
+        // マニュアルフォーカスからオートフォーカスに復帰 & focusLockedリセット
         _uiState.update { it.copy(
             settings = it.settings.copy(autoFocus = true),
+            focusLocked = false,
         ) }
         cameraController?.tapToFocus(previewView, x, y)
     }

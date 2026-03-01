@@ -60,6 +60,10 @@ import com.goodcamera.app.ui.components.GridOverlay
 import com.goodcamera.app.ui.components.ModeSelectorBar
 import com.goodcamera.app.ui.components.ProControlsPanel
 import com.goodcamera.app.ui.viewmodel.CameraViewModel
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 fun CameraScreen(
@@ -107,14 +111,15 @@ fun CameraScreen(
             focusRingScale.snapTo(1.4f)
             // 高速縮小 (150ms)
             focusRingScale.animateTo(1f, animationSpec = tween(150))
-            // フォーカス結果を最大1.5秒待つ
-            var waited = 0L
-            while (!uiState.focusLocked && waited < 1500L) {
-                kotlinx.coroutines.delay(50)
-                waited += 50
+            // ViewModelのStateFlowを直接collectしてフォーカス結果を待つ（最大1.5秒）
+            val locked = withTimeoutOrNull(1500L) {
+                viewModel.uiState
+                    .map { it.focusLocked }
+                    .filter { it }
+                    .first()
             }
             // 結果に応じて色を変える
-            focusRingColor = if (uiState.focusLocked) Color.Green else Color.Yellow
+            focusRingColor = if (locked != null) Color.Green else Color.Yellow
             // 色を見せてからフェードアウト
             kotlinx.coroutines.delay(600)
             focusRingAlpha.animateTo(0f, animationSpec = tween(300))

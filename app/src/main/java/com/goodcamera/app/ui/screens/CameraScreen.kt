@@ -119,7 +119,7 @@ fun CameraScreen(
                     .first()
             }
             // 結果に応じて色を変える
-            focusRingColor = if (locked != null) Color.Green else Color.Yellow
+            focusRingColor = if (locked != null) Color.Blue else Color.Yellow
             // 色を見せてからフェードアウト
             kotlinx.coroutines.delay(600)
             focusRingAlpha.animateTo(0f, animationSpec = tween(300))

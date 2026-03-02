@@ -111,12 +111,25 @@ fun CameraScreen(
             focusRingScale.snapTo(1.4f)
             // 高速縮小 (150ms)
             focusRingScale.animateTo(1f, animationSpec = tween(150))
-            // ViewModelのStateFlowを直接collectしてフォーカス結果を待つ（最大1.5秒）
-            val locked = withTimeoutOrNull(1500L) {
+            // ViewModelのStateFlowを直接collectしてフォーカス結果を待つ（最大3.5秒）
+            var locked = withTimeoutOrNull(3500L) {
                 viewModel.uiState
                     .map { it.focusLocked }
                     .filter { it }
                     .first()
+            }
+            // 失敗時にリトライ: もう一度AFをトリガーして再度待つ
+            if (locked == null) {
+                focusRingColor = Color.White
+                focusRingScale.snapTo(1.2f)
+                focusRingScale.animateTo(1f, animationSpec = tween(100))
+                viewModel.tapToFocus(previewView, focusTapPosition!!.x, focusTapPosition!!.y)
+                locked = withTimeoutOrNull(3500L) {
+                    viewModel.uiState
+                        .map { it.focusLocked }
+                        .filter { it }
+                        .first()
+                }
             }
             // 結果に応じて色を変える
             focusRingColor = if (locked != null) Color.Blue else Color.Yellow

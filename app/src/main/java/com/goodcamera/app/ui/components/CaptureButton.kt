@@ -117,7 +117,7 @@ private fun ShutterButton(
  * タップでも1回連写トリガー（短い連写）。
  */
 @Composable
-private fun BurstShutterButton(
+fun BurstShutterButton(
     isBurstActive: Boolean,
     burstCount: Int,
     onBurstStart: () -> Unit,

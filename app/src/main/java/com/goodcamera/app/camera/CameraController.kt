@@ -294,6 +294,53 @@ class CameraController(private val context: Context) {
     }
 
     /**
+     * バーストモード用: 1枚撮影してコールバックで通知する。
+     * 連番はタイムスタンプ + index で衝突を回避。
+     *
+     * @param burstId バースト開始時のタイムスタンプ (同一バースト内で共通)
+     * @param index バースト内の連番 (1始まり)
+     * @param onSaved 保存完了時のコールバック (保存パス)
+     */
+    fun captureBurstPhoto(burstId: String, index: Int, onSaved: (String) -> Unit) {
+        val capture = imageCapture ?: run {
+            onError?.invoke("Camera not ready")
+            return
+        }
+
+        val filename = "GoodCam_Burst_${burstId}_${index.toString().padStart(3, '0')}.jpg"
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/GoodCamera")
+            }
+        }
+
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(
+            context.contentResolver,
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            contentValues,
+        ).build()
+
+        capture.takePicture(
+            outputOptions,
+            ContextCompat.getMainExecutor(context),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    val uri = output.savedUri?.toString() ?: ""
+                    onSaved(uri)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Burst capture failed (index=$index)", exception)
+                    // バーストでは個別フレームのエラーは無視して続行
+                }
+            },
+        )
+    }
+
+    /**
      * ナイトモード撮影: 複数フレームをメモリ上にキャプチャして返す。
      *
      * @param frameCount 撮影するフレーム数

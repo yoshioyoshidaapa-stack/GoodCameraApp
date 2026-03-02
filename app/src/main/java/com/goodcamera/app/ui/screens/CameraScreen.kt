@@ -56,6 +56,7 @@ import com.goodcamera.app.camera.AppScreen
 import com.goodcamera.app.camera.CaptureMode
 import com.goodcamera.app.camera.GridType
 import com.goodcamera.app.camera.NormalizedFace
+import com.goodcamera.app.ui.components.BurstShutterButton
 import com.goodcamera.app.ui.components.GridOverlay
 import com.goodcamera.app.ui.components.ModeSelectorBar
 import com.goodcamera.app.ui.components.ProControlsPanel
@@ -384,6 +385,29 @@ fun CameraScreen(
             }
         }
 
+        // バーストモードインジケーター
+        if (uiState.captureMode == CaptureMode.BURST) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 12.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (uiState.isBurstActive) Color(0xCCF44336)
+                        else Color(0xCCFF9800),
+                    )
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = if (uiState.isBurstActive) "Burst ${uiState.burstCount}" else "Burst",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
         // 左側: 縦の露出補正スライダー (Proモードでは非表示 — ProControlsPanel内にEV制御あり)
         val evRange = uiState.capabilities.exposureCompensationRange
         if (evRange.first < evRange.last && uiState.captureMode != CaptureMode.PRO) {
@@ -456,30 +480,41 @@ fun CameraScreen(
                 IconButton(
                     onClick = { viewModel.navigateTo(AppScreen.GALLERY) },
                     modifier = Modifier.size(48.dp),
+                    enabled = !uiState.isBurstActive,
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Collections,
                         contentDescription = "ギャラリー",
-                        tint = Color.White,
+                        tint = if (uiState.isBurstActive) Color.White.copy(alpha = 0.3f) else Color.White,
                         modifier = Modifier.size(28.dp),
                     )
                 }
 
-                // シャッターボタン
-                ShutterButton(
-                    isCapturing = uiState.isCaptureInProgress,
-                    onClick = { viewModel.capturePhoto() },
-                )
+                // シャッターボタン (バーストモード時は長押し連写)
+                if (uiState.captureMode == CaptureMode.BURST) {
+                    BurstShutterButton(
+                        isBurstActive = uiState.isBurstActive,
+                        burstCount = uiState.burstCount,
+                        onBurstStart = { viewModel.startBurst() },
+                        onBurstStop = { viewModel.stopBurst() },
+                    )
+                } else {
+                    ShutterButton(
+                        isCapturing = uiState.isCaptureInProgress,
+                        onClick = { viewModel.capturePhoto() },
+                    )
+                }
 
                 // カメラ切替ボタン
                 IconButton(
                     onClick = { viewModel.switchCamera(context, lifecycleOwner, previewView) },
                     modifier = Modifier.size(48.dp),
+                    enabled = !uiState.isBurstActive,
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Cameraswitch,
                         contentDescription = "カメラ切替",
-                        tint = Color.White,
+                        tint = if (uiState.isBurstActive) Color.White.copy(alpha = 0.3f) else Color.White,
                         modifier = Modifier.size(32.dp),
                     )
                 }

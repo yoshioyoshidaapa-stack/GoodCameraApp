@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.*
 import kotlin.math.abs
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -48,6 +50,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var cameraController: CameraController? = null
     private var previewViewRef: PreviewView? = null
     private var aiAnalysisJob: Job? = null
+    private var burstJob: Job? = null
     private val shutterSound = MediaActionSound().apply {
         load(MediaActionSound.SHUTTER_CLICK)
     }
@@ -444,6 +447,60 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // --- バーストモード ---
+
+    /**
+     * バースト撮影を開始する。
+     * シャッターボタン長押しで呼ばれ、コルーチンループで連続撮影する。
+     * ZSLモードにより最短間隔で撮影できる。
+     */
+    fun startBurst() {
+        if (_uiState.value.isBurstActive) return
+
+        @Suppress("SpellCheckingInspection")
+        val burstId = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        _uiState.update { it.copy(
+            isBurstActive = true,
+            burstCount = 0,
+            burstSavedPaths = emptyList(),
+        ) }
+
+        burstJob = viewModelScope.launch {
+            var index = 1
+            while (isActive && _uiState.value.isBurstActive) {
+                if (_uiState.value.shutterSoundEnabled) {
+                    shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+                }
+                cameraController?.captureBurstPhoto(burstId, index) { path ->
+                    _uiState.update { state ->
+                        state.copy(
+                            burstCount = state.burstCount + 1,
+                            burstSavedPaths = state.burstSavedPaths + path,
+                            lastCapturedPath = path,
+                        )
+                    }
+                }
+                index++
+                // ZSLでも保存I/Oがあるため少し間隔をあける
+                delay(200)
+            }
+        }
+        Log.d(TAG, "Burst started (burstId=$burstId)")
+    }
+
+    /**
+     * バースト撮影を停止する。
+     * シャッターボタンのリリースで呼ばれる。
+     */
+    fun stopBurst() {
+        if (!_uiState.value.isBurstActive) return
+        burstJob?.cancel()
+        burstJob = null
+        val count = _uiState.value.burstCount
+        _uiState.update { it.copy(isBurstActive = false) }
+        Log.d(TAG, "Burst stopped ($count photos)")
+    }
+
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
@@ -451,6 +508,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         aiAnalysisJob?.cancel()
+        burstJob?.cancel()
         cameraController?.release()
         shutterSound.release()
     }

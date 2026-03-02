@@ -67,6 +67,9 @@ class CameraController(private val context: Context) {
     /** タップToフォーカス中にフォーカス距離の読み取りを待っているか */
     @Volatile
     private var awaitingFocusDistance = false
+    /** AF完了コールバックを一度だけ発火するためのフラグ */
+    @Volatile
+    private var awaitingFocusResult = false
     /** 顔検出結果をコールバックに転送するか */
     @Volatile
     private var faceDetectionEnabled = false
@@ -114,16 +117,23 @@ class CameraController(private val context: Context) {
                             request: CaptureRequest,
                             result: TotalCaptureResult,
                         ) {
-                            // フォーカス距離の読み取り
-                            if (awaitingFocusDistance) {
+                            // フォーカス距離の読み取り & AF完了通知
+                            if (awaitingFocusDistance || awaitingFocusResult) {
                                 val afState = result.get(CaptureResult.CONTROL_AF_STATE)
                                 if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
                                     afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
                                 ) {
-                                    awaitingFocusDistance = false
-                                    val distance = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
-                                    if (distance != null) {
-                                        onFocusDistanceChanged?.invoke(distance)
+                                    val focused = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
+                                    if (awaitingFocusResult) {
+                                        awaitingFocusResult = false
+                                        onFocusComplete?.invoke(focused)
+                                    }
+                                    if (awaitingFocusDistance) {
+                                        awaitingFocusDistance = false
+                                        val distance = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                                        if (distance != null) {
+                                            onFocusDistanceChanged?.invoke(distance)
+                                        }
                                     }
                                 }
                             }
@@ -209,19 +219,12 @@ class CameraController(private val context: Context) {
         camera2Control.setCaptureRequestOptions(options)
 
         awaitingFocusDistance = true
+        awaitingFocusResult = true
         val point = previewView.meteringPointFactory.createPoint(x, y, METERING_POINT_SIZE)
         val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
             .setAutoCancelDuration(1500, TimeUnit.MILLISECONDS)
             .build()
-        val future = cam.cameraControl.startFocusAndMetering(action)
-        future.addListener({
-            try {
-                val result = future.get()
-                onFocusComplete?.invoke(result.isFocusSuccessful)
-            } catch (_: Exception) {
-                onFocusComplete?.invoke(false)
-            }
-        }, ContextCompat.getMainExecutor(context))
+        cam.cameraControl.startFocusAndMetering(action)
     }
 
     private fun triggerCenterFocus(previewView: PreviewView) {

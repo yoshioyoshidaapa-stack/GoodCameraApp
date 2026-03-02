@@ -70,6 +70,9 @@ class CameraController(private val context: Context) {
     /** AF完了コールバックを一度だけ発火するためのフラグ */
     @Volatile
     private var awaitingFocusResult = false
+    /** AFスキャンが実際に開始されたか (古いFOCUSED_LOCKEDを誤検知しないためのガード) */
+    @Volatile
+    private var focusScanStarted = false
     /** 顔検出結果をコールバックに転送するか */
     @Volatile
     private var faceDetectionEnabled = false
@@ -120,8 +123,17 @@ class CameraController(private val context: Context) {
                             // フォーカス距離の読み取り & AF完了通知
                             if (awaitingFocusDistance || awaitingFocusResult) {
                                 val afState = result.get(CaptureResult.CONTROL_AF_STATE)
-                                if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
-                                    afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED
+                                // AFスキャンが実際に開始されたことを検出してから結果を受け付ける。
+                                // これにより、前回のフレームに残った古いFOCUSED_LOCKEDを
+                                // 誤って新しいフォーカス結果として拾うレースコンディションを防ぐ。
+                                if (afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN ||
+                                    afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN
+                                ) {
+                                    focusScanStarted = true
+                                }
+                                if (focusScanStarted &&
+                                    (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                                        afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)
                                 ) {
                                     val focused = afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED
                                     if (awaitingFocusResult) {
@@ -135,6 +147,7 @@ class CameraController(private val context: Context) {
                                             onFocusDistanceChanged?.invoke(distance)
                                         }
                                     }
+                                    focusScanStarted = false
                                 }
                             }
 
@@ -220,6 +233,7 @@ class CameraController(private val context: Context) {
 
         awaitingFocusDistance = true
         awaitingFocusResult = true
+        focusScanStarted = false
         val point = previewView.meteringPointFactory.createPoint(x, y, METERING_POINT_SIZE)
         val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
             .setAutoCancelDuration(1500, TimeUnit.MILLISECONDS)

@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
@@ -52,6 +53,7 @@ class CameraController(private val context: Context) {
     private var camera: Camera? = null
 
     var onCaptureComplete: ((String) -> Unit)? = null
+    var onRawCaptureComplete: ((RawCaptureHelper.RawCaptureResult) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onPreviewStarted: (() -> Unit)? = null
     /** フォーカスロック完了コールバック (true=成功, false=失敗) */
@@ -85,6 +87,18 @@ class CameraController(private val context: Context) {
     /** 現在のデバイスディスプレイ回転 (度数: 0, 90, 180, 270) */
     @Volatile
     private var displayRotationDegrees: Int = 0
+
+    private var rawCaptureHelper: RawCaptureHelper? = null
+    private var currentCameraId: String? = null
+    private var currentCharacteristics: CameraCharacteristics? = null
+    @Volatile
+    private var lastIso: Int = 200
+    @Volatile
+    private var lastExposureTimeNs: Long = 33_333_333L
+    @Volatile
+    private var lastFocusDist: Float = 0f
+    @Volatile
+    private var lastAwbMode: Int = CaptureRequest.CONTROL_AWB_MODE_AUTO
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     @androidx.camera.core.ExperimentalZeroShutterLag
@@ -120,6 +134,11 @@ class CameraController(private val context: Context) {
                             request: CaptureRequest,
                             result: TotalCaptureResult,
                         ) {
+                            result.get(CaptureResult.SENSOR_SENSITIVITY)?.let { lastIso = it }
+                            result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { lastExposureTimeNs = it }
+                            result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let { lastFocusDist = it }
+                            result.get(CaptureResult.CONTROL_AWB_MODE)?.let { lastAwbMode = it }
+
                             // フォーカス距離の読み取り & AF完了通知
                             if (awaitingFocusDistance || awaitingFocusResult) {
                                 val afState = result.get(CaptureResult.CONTROL_AF_STATE)
@@ -291,6 +310,86 @@ class CameraController(private val context: Context) {
                 }
             },
         )
+    }
+
+    fun captureRawPhoto(
+        lifecycleOwner: LifecycleOwner,
+        previewView: PreviewView,
+        manualSettings: CameraSettings?,
+    ) {
+        val cameraId = currentCameraId ?: run {
+            onError?.invoke("Camera ID not available")
+            return
+        }
+        val characteristics = currentCharacteristics ?: run {
+            onError?.invoke("Camera characteristics not available")
+            return
+        }
+
+        if (rawCaptureHelper == null) {
+            rawCaptureHelper = RawCaptureHelper(context)
+        }
+
+        val exposureParams = if (manualSettings != null && !manualSettings.autoExposure) {
+            RawCaptureHelper.ExposureParams(
+                iso = manualSettings.iso,
+                exposureTimeNs = manualSettings.shutterSpeedNs,
+                focusDistance = manualSettings.focusDistance,
+                awbMode = whiteBalanceToAwbMode(manualSettings.whiteBalance),
+                useAutoExposure = false,
+            )
+        } else {
+            RawCaptureHelper.ExposureParams(
+                iso = lastIso,
+                exposureTimeNs = lastExposureTimeNs,
+                focusDistance = lastFocusDist,
+                awbMode = lastAwbMode,
+                useAutoExposure = false,
+            )
+        }
+
+        val rotation = imageCapture?.targetRotation?.let { surfaceRotationToDegrees(it) } ?: 0
+
+        cameraProvider?.unbindAll()
+
+        rawCaptureHelper!!.capture(
+            cameraId = cameraId,
+            characteristics = characteristics,
+            exposureParams = exposureParams,
+            rotation = rotation,
+            onResult = { result ->
+                ContextCompat.getMainExecutor(context).execute {
+                    startCamera(lifecycleOwner, previewView, isFrontCamera)
+                    onRawCaptureComplete?.invoke(result)
+                }
+            },
+            onError = { msg ->
+                ContextCompat.getMainExecutor(context).execute {
+                    startCamera(lifecycleOwner, previewView, isFrontCamera)
+                    onError?.invoke(msg)
+                }
+            },
+        )
+    }
+
+    private fun whiteBalanceToAwbMode(mode: WhiteBalanceMode): Int {
+        return when (mode) {
+            WhiteBalanceMode.AUTO -> CaptureRequest.CONTROL_AWB_MODE_AUTO
+            WhiteBalanceMode.DAYLIGHT -> CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT
+            WhiteBalanceMode.CLOUDY -> CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
+            WhiteBalanceMode.TUNGSTEN -> CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT
+            WhiteBalanceMode.FLUORESCENT -> CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT
+            WhiteBalanceMode.SHADE -> CaptureRequest.CONTROL_AWB_MODE_SHADE
+        }
+    }
+
+    private fun surfaceRotationToDegrees(surfaceRotation: Int): Int {
+        return when (surfaceRotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
     }
 
     /**
@@ -674,6 +773,12 @@ class CameraController(private val context: Context) {
         val cam = camera ?: return
         try {
             val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+
+            val camId = camera2Info.cameraId
+            currentCameraId = camId
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            currentCharacteristics = cameraManager.getCameraCharacteristics(camId)
+
             sensorActiveRect = camera2Info.getCameraCharacteristic(
                 CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE,
             )

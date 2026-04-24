@@ -56,7 +56,9 @@ import com.goodcamera.app.camera.AppScreen
 import com.goodcamera.app.camera.CaptureMode
 import com.goodcamera.app.camera.GridType
 import com.goodcamera.app.camera.NormalizedFace
+import com.goodcamera.app.camera.OutputFormat
 import com.goodcamera.app.ui.components.BurstShutterButton
+import com.goodcamera.app.ui.components.FormatSelector
 import com.goodcamera.app.ui.components.GridOverlay
 import com.goodcamera.app.ui.components.ModeSelectorBar
 import com.goodcamera.app.ui.components.ProControlsPanel
@@ -365,6 +367,27 @@ fun CameraScreen(
             }
         }
 
+        // RAW撮影中オーバーレイ
+        if (uiState.rawCapturing) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color(0xFFFF9800))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "RAW撮影中...",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
         // ナイトモードインジケーター
         if (uiState.captureMode == CaptureMode.NIGHT && !uiState.isCaptureInProgress) {
             Box(
@@ -378,6 +401,26 @@ fun CameraScreen(
             ) {
                 Text(
                     text = "Night",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        // RAW+JPEGインジケーター
+        if (uiState.outputFormat == OutputFormat.RAW_DNG && !uiState.isCaptureInProgress) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 16.dp, top = 52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xCCFF9800))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = "RAW",
                     color = Color.White,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
@@ -444,6 +487,16 @@ fun CameraScreen(
                     onAutoFocusChanged = { viewModel.setAutoFocus(it) },
                     onExposureCompChanged = { viewModel.setExposureCompensation(it) },
                     modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+
+            // 出力形式切替 (RAWサポート時のみ表示)
+            if (uiState.capabilities.supportsRaw) {
+                FormatSelector(
+                    currentFormat = uiState.outputFormat,
+                    supportsRaw = true,
+                    onFormatSelected = { viewModel.setOutputFormat(it) },
+                    modifier = Modifier.padding(bottom = 6.dp),
                 )
             }
 

@@ -49,6 +49,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var cameraController: CameraController? = null
     private var previewViewRef: PreviewView? = null
+    private var lifecycleOwnerRef: LifecycleOwner? = null
     private var aiAnalysisJob: Job? = null
     private var burstJob: Job? = null
     private val shutterSound = MediaActionSound().apply {
@@ -70,12 +71,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update { it.copy(
                         isCaptureInProgress = false,
                         lastCapturedPath = path,
+                        rawCapturing = false,
+                    ) }
+                }
+                onRawCaptureComplete = { result ->
+                    _uiState.update { it.copy(
+                        isCaptureInProgress = false,
+                        lastCapturedPath = result.jpegUri ?: result.dngUri,
+                        rawCapturing = false,
                     ) }
                 }
                 onError = { msg ->
                     _uiState.update { it.copy(
                         errorMessage = msg,
                         isCaptureInProgress = false,
+                        rawCapturing = false,
                     ) }
                 }
                 onFocusComplete = { success ->
@@ -102,6 +112,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         previewViewRef = previewView
+        lifecycleOwnerRef = lifecycleOwner
         cameraController!!.startCamera(
             lifecycleOwner = lifecycleOwner,
             previewView = previewView,
@@ -124,9 +135,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         if (_uiState.value.captureMode == CaptureMode.NIGHT) {
             captureNightMode()
+        } else if (_uiState.value.outputFormat == OutputFormat.RAW_DNG) {
+            captureRawPhoto()
         } else {
             cameraController?.capturePhoto()
         }
+    }
+
+    private fun captureRawPhoto() {
+        val previewView = previewViewRef ?: run {
+            _uiState.update { it.copy(isCaptureInProgress = false, errorMessage = "Preview not ready") }
+            return
+        }
+        val lifecycle = lifecycleOwnerRef ?: run {
+            _uiState.update { it.copy(isCaptureInProgress = false, errorMessage = "Lifecycle not ready") }
+            return
+        }
+        _uiState.update { it.copy(rawCapturing = true) }
+
+        val manualSettings = if (_uiState.value.captureMode == CaptureMode.PRO &&
+            !_uiState.value.settings.autoExposure
+        ) _uiState.value.settings else null
+
+        cameraController?.captureRawPhoto(lifecycle, previewView, manualSettings)
     }
 
     private fun captureNightMode() {
@@ -359,6 +390,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             cameraController?.setManualFocusDistance(_uiState.value.settings.focusDistance)
         }
+    }
+
+    fun setOutputFormat(format: OutputFormat) {
+        _uiState.update { it.copy(outputFormat = format) }
     }
 
     fun setGridType(type: GridType) {

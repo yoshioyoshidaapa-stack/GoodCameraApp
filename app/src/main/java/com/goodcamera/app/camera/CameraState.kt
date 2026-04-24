@@ -102,6 +102,8 @@ data class CameraUiState(
     val faceFocusLocked: Boolean = false,
     // Shutter Sound
     val shutterSoundEnabled: Boolean = true,
+    // RAW capture
+    val rawCapturing: Boolean = false,
 )
 
 /**

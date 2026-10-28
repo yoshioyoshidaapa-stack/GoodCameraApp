@@ -104,6 +104,8 @@ data class CameraUiState(
     val shutterSoundEnabled: Boolean = true,
     // RAW capture
     val rawCapturing: Boolean = false,
+    // Claude API
+    val claudeApiKey: String = "",
 )
 
 /**

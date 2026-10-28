@@ -32,6 +32,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         private const val TAG = "CameraViewModel"
         private const val PREFS_NAME = "good_camera_prefs"
         private const val KEY_SHUTTER_SOUND = "shutter_sound_enabled"
+        private const val KEY_CLAUDE_API_KEY = "claude_api_key"
         /** 顔フォーカスの最小間隔 (ms) — チラつき防止 */
         private const val FACE_FOCUS_THROTTLE_MS = 1500L
         /** 顔位置が大きく動いた時のみ再フォーカスする閾値 (正規化座標) */
@@ -43,6 +44,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(
         CameraUiState(
             shutterSoundEnabled = prefs.getBoolean(KEY_SHUTTER_SOUND, true),
+            claudeApiKey = prefs.getString(KEY_CLAUDE_API_KEY, "") ?: "",
         )
     )
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
@@ -403,6 +405,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setShutterSoundEnabled(enabled: Boolean) {
         _uiState.update { it.copy(shutterSoundEnabled = enabled) }
         prefs.edit().putBoolean(KEY_SHUTTER_SOUND, enabled).apply()
+    }
+
+    fun setClaudeApiKey(apiKey: String) {
+        val trimmed = apiKey.trim()
+        _uiState.update { it.copy(claudeApiKey = trimmed) }
+        prefs.edit().putString(KEY_CLAUDE_API_KEY, trimmed).apply()
     }
 
     fun navigateTo(screen: AppScreen) {

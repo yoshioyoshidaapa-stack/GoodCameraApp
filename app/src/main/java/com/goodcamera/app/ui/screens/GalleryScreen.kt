@@ -21,9 +21,12 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -40,7 +43,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.goodcamera.app.ai.ClaudePhotoAdvisor
+import com.goodcamera.app.ai.PhotoForClaude
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class GalleryItem(
@@ -60,6 +66,7 @@ data class GalleryItem(
 fun GalleryScreen(
     onBack: () -> Unit,
     startWithLatestPhoto: Boolean = false,
+    claudeApiKey: String = "",
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -84,6 +91,7 @@ fun GalleryScreen(
         PhotoDetailScreen(
             photos = photos,
             initialIndex = selectedIndex,
+            claudeApiKey = claudeApiKey,
             onBack = {
                 if (startWithLatestPhoto && selectedIndex == 0) {
                     // 最新写真プレビューから戻る → カメラに戻る
@@ -225,6 +233,7 @@ private fun GalleryThumbnail(
 private fun PhotoDetailScreen(
     photos: List<GalleryItem>,
     initialIndex: Int,
+    claudeApiKey: String,
     onBack: () -> Unit,
     onNavigateToCamera: () -> Unit,
     onPinchOut: () -> Unit,
@@ -248,6 +257,56 @@ private fun PhotoDetailScreen(
     val photoIndex = pagerState.currentPage - 1
     val currentItem = photos.getOrNull(photoIndex)
     var showDeleteDialog by remember { mutableStateOf(false) }
+
+    // Claudeに写真を見てもらう
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var claudeAnswer by remember { mutableStateOf<String?>(null) }
+    var askingClaude by remember { mutableStateOf(false) }
+
+    fun askClaude(item: GalleryItem) {
+        askingClaude = true
+        claudeAnswer = null
+        scope.launch {
+            claudeAnswer = withContext(Dispatchers.IO) {
+                val jpeg = PhotoForClaude.loadJpeg(context, item.uri)
+                if (jpeg == null) {
+                    "写真を読み込めませんでした。"
+                } else {
+                    ClaudePhotoAdvisor.askAboutPhoto(claudeApiKey, jpeg)
+                }
+            }
+            askingClaude = false
+        }
+    }
+
+    if (askingClaude || claudeAnswer != null) {
+        AlertDialog(
+            onDismissRequest = { if (!askingClaude) claudeAnswer = null },
+            title = { Text("Claudeの回答") },
+            text = {
+                if (askingClaude) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("写真を見てもらっています…")
+                    }
+                } else {
+                    Text(
+                        text = claudeAnswer.orEmpty(),
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    )
+                }
+            },
+            confirmButton = {
+                if (!askingClaude) {
+                    TextButton(onClick = { claudeAnswer = null }) {
+                        Text("閉じる")
+                    }
+                }
+            },
+        )
+    }
 
     if (showDeleteDialog && currentItem != null) {
         AlertDialog(
@@ -318,6 +377,12 @@ private fun PhotoDetailScreen(
             }
             if (currentItem != null) {
                 Row {
+                    IconButton(
+                        onClick = { askClaude(currentItem) },
+                        enabled = !askingClaude,
+                    ) {
+                        Icon(Icons.Filled.AutoAwesome, "Claudeに聞く", tint = Color.White)
+                    }
                     IconButton(onClick = { onShare(currentItem) }) {
                         Icon(Icons.Filled.Share, "共有", tint = Color.White)
                     }

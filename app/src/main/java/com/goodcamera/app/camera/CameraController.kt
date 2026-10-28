@@ -34,11 +34,27 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.goodcamera.app.util.MediaStoreSaver
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
-class CameraController(private val context: Context) {
+/**
+ * @param context Activity を渡しても内部では applicationContext だけを保持する
+ *        (画面の作り直し後も古い Activity をつかみ続けてリークしないように)
+ */
+class CameraController(context: Context) {
+
+    private val context: Context = context.applicationContext
+    private val mainExecutor = ContextCompat.getMainExecutor(this.context)
+    /** 撮影画像のデコードなど重い処理をメインスレッドから外すための専用スレッド */
+    private val captureExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     companion object {
         private const val TAG = "CameraController"
@@ -179,7 +195,12 @@ class CameraController(private val context: Context) {
                                         convertFaceToNormalized(face, activeRect)
                                     }
                                     if (detected.isNotEmpty()) {
-                                        onFacesDetected?.invoke(detected)
+                                        // このコールバックはカメラのスレッドで呼ばれる。
+                                        // 受け取り側は PreviewView (メインスレッド専用) を触るため、
+                                        // メインスレッドに載せ替えて通知する
+                                        mainExecutor.execute {
+                                            if (faceDetectionEnabled) onFacesDetected?.invoke(detected)
+                                        }
                                     }
                                 }
                             }
@@ -334,9 +355,10 @@ class CameraController(private val context: Context) {
             RawCaptureHelper.ExposureParams(
                 iso = manualSettings.iso,
                 exposureTimeNs = manualSettings.shutterSpeedNs,
-                focusDistance = manualSettings.focusDistance,
+                // AF が ON のときは、プレビューの AF が合わせた距離を使う
+                // (手動フォーカス用の値は初期値 0 = 無限遠なので、そのまま使うとピンボケになる)
+                focusDistance = if (manualSettings.autoFocus) lastFocusDist else manualSettings.focusDistance,
                 awbMode = whiteBalanceToAwbMode(manualSettings.whiteBalance),
-                useAutoExposure = false,
             )
         } else {
             RawCaptureHelper.ExposureParams(
@@ -344,11 +366,10 @@ class CameraController(private val context: Context) {
                 exposureTimeNs = lastExposureTimeNs,
                 focusDistance = lastFocusDist,
                 awbMode = lastAwbMode,
-                useAutoExposure = false,
             )
         }
 
-        val rotation = imageCapture?.targetRotation?.let { surfaceRotationToDegrees(it) } ?: 0
+        val jpegOrientation = computeJpegOrientation(characteristics)
 
         cameraProvider?.unbindAll()
 
@@ -356,15 +377,15 @@ class CameraController(private val context: Context) {
             cameraId = cameraId,
             characteristics = characteristics,
             exposureParams = exposureParams,
-            rotation = rotation,
+            jpegOrientation = jpegOrientation,
             onResult = { result ->
-                ContextCompat.getMainExecutor(context).execute {
+                mainExecutor.execute {
                     startCamera(lifecycleOwner, previewView, isFrontCamera)
                     onRawCaptureComplete?.invoke(result)
                 }
             },
             onError = { msg ->
-                ContextCompat.getMainExecutor(context).execute {
+                mainExecutor.execute {
                     startCamera(lifecycleOwner, previewView, isFrontCamera)
                     onError?.invoke(msg)
                 }
@@ -383,6 +404,21 @@ class CameraController(private val context: Context) {
         }
     }
 
+    /**
+     * Camera2 の JPEG_ORIENTATION に設定する値を求める。
+     * センサー自体の取り付け向き (SENSOR_ORIENTATION) と端末の回転を合成する。
+     * targetRotation は画面の回転 (端末の回転と逆向き) なので、背面カメラでは引き算になる。
+     */
+    private fun computeJpegOrientation(characteristics: CameraCharacteristics): Int {
+        val sensorDeg = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: sensorOrientation
+        val surfaceDeg = surfaceRotationToDegrees(imageCapture?.targetRotation ?: Surface.ROTATION_0)
+        return if (isFrontCamera) {
+            (sensorDeg + surfaceDeg) % 360
+        } else {
+            (sensorDeg - surfaceDeg + 360) % 360
+        }
+    }
+
     private fun surfaceRotationToDegrees(surfaceRotation: Int): Int {
         return when (surfaceRotation) {
             Surface.ROTATION_90 -> 90
@@ -393,17 +429,17 @@ class CameraController(private val context: Context) {
     }
 
     /**
-     * バーストモード用: 1枚撮影してコールバックで通知する。
+     * バーストモード用: 1枚撮影して保存し、保存が終わるまで待つ。
      * 連番はタイムスタンプ + index で衝突を回避。
      *
      * @param burstId バースト開始時のタイムスタンプ (同一バースト内で共通)
      * @param index バースト内の連番 (1始まり)
-     * @param onSaved 保存完了時のコールバック (保存パス)
+     * @return 保存先 URI。失敗時は null
      */
-    fun captureBurstPhoto(burstId: String, index: Int, onSaved: (String) -> Unit) {
+    suspend fun captureBurstPhoto(burstId: String, index: Int): String? {
         val capture = imageCapture ?: run {
             onError?.invoke("Camera not ready")
-            return
+            return null
         }
 
         val filename = "GoodCam_Burst_${burstId}_${index.toString().padStart(3, '0')}.jpg"
@@ -422,99 +458,97 @@ class CameraController(private val context: Context) {
             contentValues,
         ).build()
 
-        capture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(context),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    val uri = output.savedUri?.toString() ?: ""
-                    onSaved(uri)
-                }
+        return suspendCancellableCoroutine<String?> { cont ->
+            capture.takePicture(
+                outputOptions,
+                captureExecutor,
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                        cont.resume(output.savedUri?.toString())
+                    }
 
-                override fun onError(exception: ImageCaptureException) {
-                    Log.e(TAG, "Burst capture failed (index=$index)", exception)
-                    // バーストでは個別フレームのエラーは無視して続行
-                }
-            },
-        )
+                    override fun onError(exception: ImageCaptureException) {
+                        Log.e(TAG, "Burst capture failed (index=$index)", exception)
+                        // バーストでは個別フレームのエラーは無視して続行
+                        cont.resume(null)
+                    }
+                },
+            )
+        }
     }
 
     /**
-     * ナイトモード撮影: 複数フレームをメモリ上にキャプチャして返す。
-     *
-     * @param frameCount 撮影するフレーム数
-     * @param onFrameCaptured フレームキャプチャ毎のコールバック (捕捉済み枚数)
-     * @param onAllFrames 全フレーム取得後のコールバック
+     * 1枚撮影し、向きを補正した Bitmap として返す (ファイルには保存しない)。
+     * ナイトモード・HDR・自動補正付き撮影で使う。
+     * デコードは専用スレッドで行うのでメインスレッドを止めない。
      */
-    fun captureNightFrames(
-        frameCount: Int,
-        onFrameCaptured: (Int) -> Unit,
-        onAllFrames: (List<Bitmap>) -> Unit,
-    ) {
-        val capture = imageCapture ?: run {
-            onError?.invoke("Camera not ready")
-            return
-        }
-        val frames = Collections.synchronizedList(mutableListOf<Bitmap>())
-        val executor = ContextCompat.getMainExecutor(context)
-
-        fun captureNext(remaining: Int) {
-            if (remaining <= 0) {
-                onAllFrames(frames.toList())
-                return
-            }
-            capture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
+    suspend fun captureFrame(): Bitmap {
+        val capture = imageCapture ?: throw IllegalStateException("Camera not ready")
+        return suspendCancellableCoroutine<Bitmap> { cont ->
+            capture.takePicture(captureExecutor, object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
-                    val bitmap = imageProxyToBitmap(image)
+                    // OutOfMemoryError も呼び出し元に伝えるため Throwable で受ける
+                    val result = runCatching { imageProxyToBitmap(image) }
                     image.close()
-                    if (bitmap != null) {
-                        frames.add(bitmap)
-                        onFrameCaptured(frames.size)
+                    val bitmap = result.getOrElse {
+                        cont.resumeWithException(it)
+                        return
                     }
-                    captureNext(remaining - 1)
+                    if (bitmap != null) {
+                        cont.resume(bitmap)
+                    } else {
+                        cont.resumeWithException(IOException("Failed to decode captured image"))
+                    }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
-                    Log.e(TAG, "Night frame capture failed", exception)
-                    // エラーでも続行し、取得済みフレームで合成
-                    captureNext(remaining - 1)
+                    cont.resumeWithException(exception)
                 }
             })
         }
+    }
 
-        captureNext(frameCount)
+    /** 露出補正 1段あたりの EV 値 (未対応なら 0) */
+    val exposureCompensationStepEv: Float
+        get() {
+            val state = camera?.cameraInfo?.exposureState ?: return 0f
+            if (!state.isExposureCompensationSupported) return 0f
+            return state.exposureCompensationStep.toFloat()
+        }
+
+    /** 露出補正インデックスの範囲 */
+    val exposureCompensationRange: IntRange
+        get() {
+            val range = camera?.cameraInfo?.exposureState?.exposureCompensationRange ?: return 0..0
+            return range.lower..range.upper
+        }
+
+    /** 現在の露出補正インデックス */
+    val exposureCompensationIndex: Int
+        get() = camera?.cameraInfo?.exposureState?.exposureCompensationIndex ?: 0
+
+    /**
+     * 露出補正を設定し、AE が新しい値で落ち着くまで待つ。
+     * 設定が後から上書きされた等で失敗しても、待ちは解除する。
+     */
+    suspend fun setExposureCompensationAndAwait(index: Int) {
+        val cam = camera ?: return
+        val future = cam.cameraControl.setExposureCompensationIndex(index)
+        suspendCancellableCoroutine<Unit> { cont ->
+            future.addListener({ cont.resume(Unit) }, mainExecutor)
+        }
     }
 
     /**
      * Bitmap を JPEG として MediaStore に保存する。
      */
-    fun saveBitmapToGallery(bitmap: Bitmap): String? {
+    fun saveBitmapToGallery(bitmap: Bitmap, prefix: String = "GoodCam"): String? {
         @Suppress("SpellCheckingInspection")
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val filename = "GoodCam_Night_$timestamp.jpg"
-
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(
-                    MediaStore.MediaColumns.RELATIVE_PATH,
-                    Environment.DIRECTORY_DCIM + "/GoodCamera",
-                )
-            }
-        }
-
         return try {
-            val uri = context.contentResolver.insert(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                contentValues,
-            ) ?: return null
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
-            }
-            uri.toString()
+            MediaStoreSaver.saveJpeg(context, bitmap, "${prefix}_$timestamp.jpg")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save night mode photo", e)
+            Log.e(TAG, "Failed to save photo", e)
             null
         }
     }
@@ -948,6 +982,7 @@ class CameraController(private val context: Context) {
         orientationListener = null
         faceDetectionEnabled = false
         cameraProvider?.unbindAll()
+        captureExecutor.shutdown()
     }
 }
 

@@ -72,6 +72,8 @@ private fun CameraAppContent() {
                     onGridTypeChanged = { viewModel.setGridType(it) },
                     shutterSoundEnabled = uiState.shutterSoundEnabled,
                     onShutterSoundChanged = { viewModel.setShutterSoundEnabled(it) },
+                    autoProcessEnabled = uiState.autoProcessEnabled,
+                    onAutoProcessChanged = { viewModel.setAutoProcessEnabled(it) },
                     onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
                 )
             }

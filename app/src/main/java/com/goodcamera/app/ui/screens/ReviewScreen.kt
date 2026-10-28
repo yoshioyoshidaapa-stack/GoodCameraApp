@@ -1,9 +1,10 @@
 package com.goodcamera.app.ui.screens
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -27,20 +28,40 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.goodcamera.app.processing.ImageProcessor
+import com.goodcamera.app.util.BitmapLoader
+import com.goodcamera.app.util.MediaStoreSaver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private const val TAG = "ReviewScreen"
+
+/** プレビュー用に読み込む画像の長辺の上限 (px)。調整のたびの再処理を軽くする */
+private const val PREVIEW_MAX_SIZE = 2048
+
+/** スライダー操作中に毎回処理し直さないための待ち時間 (ms) */
+private const val PROCESS_DEBOUNCE_MS = 200L
 
 /**
  * 撮影後レビュー画面
  * 後処理の適用・比較・保存ができる
+ *
+ * 画面上の確認は縮小画像で行い、保存するときだけ元の解像度で処理する。
+ *
+ * @param onSaved 保存が終わったときに呼ばれる (保存先 URI。失敗時は null)
  */
 @Composable
 fun ReviewScreen(
     imagePath: String,
     onBack: () -> Unit,
-    onSave: (Bitmap) -> Unit,
+    onSaved: (String?) -> Unit,
     autoContrastEnabled: Boolean = true,
     aiProcessingConfig: ImageProcessor.ProcessingConfig? = null,
     modifier: Modifier = Modifier,
@@ -53,6 +74,9 @@ fun ReviewScreen(
     var isProcessing by remember { mutableStateOf(false) }
     var showOriginal by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val imageUri = remember(imagePath) { toUri(imagePath) }
 
     // AIモードの場合、AIが推奨した設定で初期化
     val aiConfig = aiProcessingConfig
@@ -67,40 +91,48 @@ fun ReviewScreen(
     var dehazeEnabled by remember { mutableStateOf(aiConfig?.dehazeEnabled ?: false) }
     var dehazeStrength by remember { mutableFloatStateOf(aiConfig?.dehazeStrength ?: 0.7f) }
 
-    // 画像をロード
-    LaunchedEffect(imagePath) {
-        withContext(Dispatchers.IO) {
-            val bitmap = if (imagePath.startsWith("content://")) {
-                val uri = Uri.parse(imagePath)
-                context.contentResolver.openInputStream(uri)?.use {
-                    BitmapFactory.decodeStream(it)
-                }
-            } else {
-                BitmapFactory.decodeFile(imagePath)
+    fun currentConfig() = ImageProcessor.ProcessingConfig(
+        autoWbEnabled = autoWbEnabled,
+        denoiseEnabled = denoiseEnabled,
+        denoiseStrength = denoiseStrength,
+        deblurEnabled = deblurEnabled,
+        perceptualEnabled = perceptualEnabled,
+        sharpenEnabled = sharpenEnabled,
+        sharpenAmount = sharpenAmount,
+        autoLevelsEnabled = autoLevelsEnabled,
+        dehazeEnabled = dehazeEnabled,
+        dehazeStrength = dehazeStrength,
+    )
+
+    // 画像をロード (プレビュー用に縮小、EXIF の向きを反映)
+    LaunchedEffect(imageUri) {
+        originalBitmap = withContext(Dispatchers.IO) {
+            try {
+                BitmapLoader.load(context, imageUri, PREVIEW_MAX_SIZE)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load image", e)
+                null
             }
-            originalBitmap = bitmap
         }
     }
 
     // 後処理を適用
-    LaunchedEffect(originalBitmap, autoWbEnabled, denoiseEnabled, denoiseStrength, deblurEnabled, perceptualEnabled, sharpenEnabled, sharpenAmount, autoLevelsEnabled, dehazeEnabled, dehazeStrength) {
+    // 設定が変わると LaunchedEffect が作り直され、前の処理はキャンセルされる。
+    // 処理の途中でも ensureActive() で止まるので、古い設定の結果で表示が上書きされない。
+    val config = currentConfig()
+    LaunchedEffect(originalBitmap, config) {
         val original = originalBitmap ?: return@LaunchedEffect
+        delay(PROCESS_DEBOUNCE_MS)
         isProcessing = true
-        withContext(Dispatchers.Default) {
-            val config = ImageProcessor.ProcessingConfig(
-                autoWbEnabled = autoWbEnabled,
-                denoiseEnabled = denoiseEnabled,
-                denoiseStrength = denoiseStrength,
-                deblurEnabled = deblurEnabled,
-                perceptualEnabled = perceptualEnabled,
-                sharpenEnabled = sharpenEnabled,
-                sharpenAmount = sharpenAmount,
-                autoLevelsEnabled = autoLevelsEnabled,
-                dehazeEnabled = dehazeEnabled,
-                dehazeStrength = dehazeStrength,
-            )
-            processedBitmap = ImageProcessor.process(original, config)
+        val result = withContext(Dispatchers.Default) {
+            try {
+                ImageProcessor.process(original, config) { ensureActive() }
+            } catch (oom: OutOfMemoryError) {
+                Log.e(TAG, "Out of memory while processing preview", oom)
+                null
+            }
         }
+        processedBitmap = result
         isProcessing = false
     }
 
@@ -121,7 +153,7 @@ fun ReviewScreen(
         }
 
         // 処理中インジケータ
-        if (isProcessing) {
+        if (isProcessing || isSaving) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center),
                 color = MaterialTheme.colorScheme.primary,
@@ -172,10 +204,21 @@ fun ReviewScreen(
                     Icon(Icons.Filled.Share, "共有", tint = Color.White)
                 }
 
-                // 保存ボタン
-                IconButton(onClick = {
-                    processedBitmap?.let { onSave(it) }
-                }) {
+                // 保存ボタン (元の解像度で処理し直して保存する)
+                IconButton(
+                    enabled = !isSaving && originalBitmap != null,
+                    onClick = {
+                        isSaving = true
+                        val saveConfig = currentConfig()
+                        scope.launch {
+                            val savedPath = withContext(Dispatchers.Default) {
+                                saveFullResolution(context, imageUri, saveConfig)
+                            }
+                            isSaving = false
+                            onSaved(savedPath)
+                        }
+                    },
+                ) {
                     Icon(Icons.Filled.Check, "保存", tint = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -426,5 +469,43 @@ private fun SettingRow(
                 checkedThumbColor = MaterialTheme.colorScheme.primary,
             ),
         )
+    }
+}
+
+private fun toUri(imagePath: String): Uri =
+    if (imagePath.startsWith("content://") || imagePath.startsWith("file://")) {
+        Uri.parse(imagePath)
+    } else {
+        Uri.fromFile(File(imagePath))
+    }
+
+/**
+ * 元の解像度で読み込み直して補正をかけ、新しい写真として保存する。
+ * @return 保存先 URI。失敗時 (メモリ不足を含む) は null
+ */
+private fun saveFullResolution(
+    context: Context,
+    uri: Uri,
+    config: ImageProcessor.ProcessingConfig,
+): String? {
+    return try {
+        val original = BitmapLoader.load(context, uri) ?: return null
+        val processed = try {
+            ImageProcessor.process(original, config)
+        } catch (t: Throwable) {
+            original.recycle()
+            throw t
+        }
+        // 補正をすべてOFFにした場合は original がそのまま返る
+        if (processed !== original) original.recycle()
+        try {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            MediaStoreSaver.saveJpeg(context, processed, "GoodCam_Edit_$timestamp.jpg")
+        } finally {
+            processed.recycle()
+        }
+    } catch (t: Throwable) {
+        Log.e(TAG, "Failed to save processed image", t)
+        null
     }
 }

@@ -23,6 +23,8 @@ fun SettingsScreen(
     onGridTypeChanged: (GridType) -> Unit,
     shutterSoundEnabled: Boolean,
     onShutterSoundChanged: (Boolean) -> Unit,
+    autoProcessEnabled: Boolean,
+    onAutoProcessChanged: (Boolean) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -84,6 +86,26 @@ fun SettingsScreen(
                         Switch(
                             checked = shutterSoundEnabled,
                             onCheckedChange = onShutterSoundChanged,
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // 撮影後の自動補正
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("撮影後の自動補正", color = Color.White, fontSize = 14.sp)
+                            Text(
+                                "Auto/AI/Pro/接写で撮った写真に補正をかけて保存します。保存まで数秒かかります",
+                                color = Color.Gray,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        Switch(
+                            checked = autoProcessEnabled,
+                            onCheckedChange = onAutoProcessChanged,
                         )
                     }
                 }

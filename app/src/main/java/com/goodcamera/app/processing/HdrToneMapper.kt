@@ -39,103 +39,134 @@ object HdrToneMapper {
      * @param frames 露出の異なる複数フレーム（暗→明の順）
      * @param gamma ガンマ補正値
      * @param saturation 彩度調整（1.0=元のまま、>1.0=鮮やか）
+     * @param exposureValues 各フレームの露出補正量 (EV)。null の場合は中央フレームを0とした 1EV 刻みとみなす
      */
     fun mergeAndToneMap(
         frames: List<Bitmap>,
         gamma: Float = 1.0f,
         saturation: Float = 1.1f,
+        exposureValues: List<Float>? = null,
     ): Bitmap {
         if (frames.isEmpty()) return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         if (frames.size == 1) return frames[0].copy(Bitmap.Config.ARGB_8888, false)
 
-        val width = frames[0].width
-        val height = frames[0].height
-        val pixelCount = width * height
+        val midIdx = frames.size / 2
+        val merger = Merger(frames[0].width, frames[0].height)
+        for ((frameIdx, frame) in frames.withIndex()) {
+            val ev = exposureValues?.getOrNull(frameIdx) ?: (frameIdx - midIdx).toFloat()
+            merger.add(frame, ev)
+        }
+        return merger.toneMap(saturation)
+    }
+
+    /**
+     * フレームを1枚ずつ足し込むHDR合成器。
+     *
+     * 全フレームを同時にメモリに持たずに済むため、撮影しながら合成できる。
+     * サイズが基準 (コンストラクタの幅・高さ) と異なるフレームは無視する。
+     */
+    class Merger(val width: Int, val height: Int) {
+        private val pixelCount = width * height
 
         // HDR放射輝度マップ（float）
-        val hdrR = FloatArray(pixelCount)
-        val hdrG = FloatArray(pixelCount)
-        val hdrB = FloatArray(pixelCount)
-        val weightSum = FloatArray(pixelCount)
+        private val hdrR = FloatArray(pixelCount)
+        private val hdrG = FloatArray(pixelCount)
+        private val hdrB = FloatArray(pixelCount)
+        private val weightSum = FloatArray(pixelCount)
+        private val row = IntArray(width)
 
-        // 各フレームから重み付き合成
-        for ((frameIdx, frame) in frames.withIndex()) {
-            val pixels = IntArray(pixelCount)
-            frame.getPixels(pixels, 0, width, 0, 0, width, height)
+        var frameCount = 0
+            private set
 
-            // フレームの相対露出値（中央フレームを基準=1.0）
-            val midIdx = frames.size / 2
-            val invExposure = 1f / 2f.pow(frameIdx - midIdx)
+        /**
+         * フレームを追加する。
+         * @param exposureValue このフレームの露出補正量 (EV、基準フレーム=0)
+         * @return 追加できた場合 true。サイズ不一致なら false
+         */
+        fun add(frame: Bitmap, exposureValue: Float): Boolean {
+            if (frame.width != width || frame.height != height) return false
 
-            for (i in pixels.indices) {
-                val ri = (pixels[i] shr 16) and 0xFF
-                val gi = (pixels[i] shr 8) and 0xFF
-                val bi = pixels[i] and 0xFF
+            // フレームの相対露出値（基準フレーム=1.0）
+            val invExposure = 1f / 2f.pow(exposureValue)
 
-                // 重み関数: LUTで参照（中間トーンを高重み）
-                val luminanceIdx = ((54 * ri + 183 * gi + 18 * bi) shr 8).coerceIn(0, 255)
-                val weight = triangleWeightLut[luminanceIdx]
+            for (y in 0 until height) {
+                frame.getPixels(row, 0, width, 0, y, width, 1)
+                val base = y * width
+                for (x in 0 until width) {
+                    val p = row[x]
+                    val i = base + x
+                    val ri = (p shr 16) and 0xFF
+                    val gi = (p shr 8) and 0xFF
+                    val bi = p and 0xFF
 
-                // LUTで逆ガンマ→リニア変換（毎ピクセルのpow()を排除）
-                val linearR = gammaToLinearLut[ri] * invExposure
-                val linearG = gammaToLinearLut[gi] * invExposure
-                val linearB = gammaToLinearLut[bi] * invExposure
+                    // 重み関数: LUTで参照（中間トーンを高重み）
+                    val luminanceIdx = ((54 * ri + 183 * gi + 18 * bi) shr 8).coerceIn(0, 255)
+                    val weight = triangleWeightLut[luminanceIdx]
 
-                hdrR[i] += linearR * weight
-                hdrG[i] += linearG * weight
-                hdrB[i] += linearB * weight
-                weightSum[i] += weight
+                    // LUTで逆ガンマ→リニア変換（毎ピクセルのpow()を排除）
+                    hdrR[i] += gammaToLinearLut[ri] * invExposure * weight
+                    hdrG[i] += gammaToLinearLut[gi] * invExposure * weight
+                    hdrB[i] += gammaToLinearLut[bi] * invExposure * weight
+                    weightSum[i] += weight
+                }
             }
+            frameCount++
+            return true
         }
 
-        // 重みで正規化
-        for (i in 0 until pixelCount) {
-            val w = if (weightSum[i] > 0f) weightSum[i] else 1f
-            hdrR[i] /= w
-            hdrG[i] /= w
-            hdrB[i] /= w
+        /** Reinhardトーンマッピングで8bit画像を生成する */
+        fun toneMap(saturation: Float = 1.1f): Bitmap {
+            // 重みで正規化
+            for (i in 0 until pixelCount) {
+                val w = if (weightSum[i] > 0f) weightSum[i] else 1f
+                hdrR[i] /= w
+                hdrG[i] /= w
+                hdrB[i] /= w
+            }
+
+            // Reinhardトーンマッピング（hdr配列をインプレースで再利用）
+            val logAvgLuminance = computeLogAverageLuminance(hdrR, hdrG, hdrB, pixelCount)
+            val key = 0.18f / (logAvgLuminance + 0.001f)
+
+            for (i in 0 until pixelCount) {
+                val kr = hdrR[i] * key; hdrR[i] = kr / (1f + kr)
+                val kg = hdrG[i] * key; hdrG[i] = kg / (1f + kg)
+                val kb = hdrB[i] * key; hdrB[i] = kb / (1f + kb)
+            }
+
+            // 彩度調整 & ガンマ補正 → 8bit出力（1行ずつ書き込み、全画素分の配列を持たない）
+            val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val lutSize = linearToGammaLut.size - 1
+
+            for (y in 0 until height) {
+                val base = y * width
+                for (x in 0 until width) {
+                    val i = base + x
+                    val tmR = hdrR[i]; val tmG = hdrG[i]; val tmB = hdrB[i]
+                    val lum = 0.2126f * tmR + 0.7152f * tmG + 0.0722f * tmB
+
+                    // 彩度調整 + ガンマ補正（LUT参照でpow()を排除）
+                    var r = (lum + saturation * (tmR - lum)).coerceIn(0f, 1f)
+                    var g = (lum + saturation * (tmG - lum)).coerceIn(0f, 1f)
+                    var b = (lum + saturation * (tmB - lum)).coerceIn(0f, 1f)
+
+                    r = linearToGammaLut[(r * lutSize).toInt().coerceIn(0, lutSize)]
+                    g = linearToGammaLut[(g * lutSize).toInt().coerceIn(0, lutSize)]
+                    b = linearToGammaLut[(b * lutSize).toInt().coerceIn(0, lutSize)]
+
+                    val iR = (r * 255f).toInt().coerceIn(0, 255)
+                    val iG = (g * 255f).toInt().coerceIn(0, 255)
+                    val iB = (b * 255f).toInt().coerceIn(0, 255)
+                    row[x] = (0xFF shl 24) or (iR shl 16) or (iG shl 8) or iB
+                }
+                output.setPixels(row, 0, width, 0, y, width, 1)
+            }
+            return output
         }
-
-        // Reinhardトーンマッピング（hdr配列をインプレースで再利用）
-        val logAvgLuminance = computeLogAverageLuminance(hdrR, hdrG, hdrB, pixelCount)
-        val key = 0.18f / (logAvgLuminance + 0.001f)
-
-        for (i in 0 until pixelCount) {
-            val kr = hdrR[i] * key; hdrR[i] = kr / (1f + kr)
-            val kg = hdrG[i] * key; hdrG[i] = kg / (1f + kg)
-            val kb = hdrB[i] * key; hdrB[i] = kb / (1f + kb)
-        }
-
-        // 彩度調整 & ガンマ補正 → 8bit出力
-        val result = IntArray(pixelCount)
-        val lutSize = linearToGammaLut.size - 1
-
-        for (i in 0 until pixelCount) {
-            val tmR = hdrR[i]; val tmG = hdrG[i]; val tmB = hdrB[i]
-            val lum = 0.2126f * tmR + 0.7152f * tmG + 0.0722f * tmB
-
-            // 彩度調整 + ガンマ補正（LUT参照でpow()を排除）
-            var r = (lum + saturation * (tmR - lum)).coerceIn(0f, 1f)
-            var g = (lum + saturation * (tmG - lum)).coerceIn(0f, 1f)
-            var b = (lum + saturation * (tmB - lum)).coerceIn(0f, 1f)
-
-            r = linearToGammaLut[(r * lutSize).toInt().coerceIn(0, lutSize)]
-            g = linearToGammaLut[(g * lutSize).toInt().coerceIn(0, lutSize)]
-            b = linearToGammaLut[(b * lutSize).toInt().coerceIn(0, lutSize)]
-
-            val iR = (r * 255f).toInt().coerceIn(0, 255)
-            val iG = (g * 255f).toInt().coerceIn(0, 255)
-            val iB = (b * 255f).toInt().coerceIn(0, 255)
-            result[i] = (0xFF shl 24) or (iR shl 16) or (iG shl 8) or iB
-        }
-
-        val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        output.setPixels(result, 0, width, 0, 0, width, height)
-        return output
     }
 
     /** 対数平均輝度の計算 */
-    private fun computeLogAverageLuminance(
+    internal fun computeLogAverageLuminance(
         r: FloatArray,
         g: FloatArray,
         b: FloatArray,

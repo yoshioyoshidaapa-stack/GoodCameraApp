@@ -146,6 +146,10 @@ fun CameraScreen(
     LaunchedEffect(uiState.usingFrontCamera) {
         viewModel.startCamera(context, lifecycleOwner, previewView)
     }
+    // 画面が破棄されたら ViewModel に PreviewView を手放させる (Activity のリーク防止)
+    DisposableEffect(previewView) {
+        onDispose { viewModel.detachPreview(previewView) }
+    }
 
     Box(
         modifier = modifier
@@ -367,6 +371,41 @@ fun CameraScreen(
             }
         }
 
+        // HDR撮影中・自動補正中オーバーレイ
+        if (uiState.postProcessing ||
+            (uiState.captureMode == CaptureMode.HDR && uiState.isCaptureInProgress)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = if (uiState.postProcessing) {
+                            "画像を補正中..."
+                        } else {
+                            "HDR撮影中 ${uiState.hdrCapturedFrames} / ${uiState.hdrFrameCount}"
+                        },
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    if (!uiState.postProcessing) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "端末を動かさないでください",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+            }
+        }
+
         // RAW撮影中オーバーレイ
         if (uiState.rawCapturing) {
             Box(
@@ -560,7 +599,7 @@ fun CameraScreen(
 
                 // カメラ切替ボタン
                 IconButton(
-                    onClick = { viewModel.switchCamera(context, lifecycleOwner, previewView) },
+                    onClick = { viewModel.switchCamera() },
                     modifier = Modifier.size(48.dp),
                     enabled = !uiState.isBurstActive,
                 ) {

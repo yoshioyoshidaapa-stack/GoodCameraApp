@@ -2,6 +2,7 @@ package com.goodcamera.app.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaActionSound
 import android.util.Log
 import androidx.camera.view.PreviewView
@@ -10,8 +11,10 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.goodcamera.app.camera.*
 import com.goodcamera.app.processing.FrameStacker
+import com.goodcamera.app.processing.HdrToneMapper
 import com.goodcamera.app.processing.ImageProcessor
 import com.goodcamera.app.processing.SceneDetector
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -22,9 +25,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -32,6 +37,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         private const val TAG = "CameraViewModel"
         private const val PREFS_NAME = "good_camera_prefs"
         private const val KEY_SHUTTER_SOUND = "shutter_sound_enabled"
+        private const val KEY_AUTO_PROCESS = "auto_process_enabled"
+        /** HDR ブラケットの露出差 (EV) */
+        private const val HDR_BRACKET_EV = 1f
+        /** 露出補正を変えてから AE が落ち着くまで待つ最大時間 (ms) */
+        private const val EXPOSURE_SETTLE_TIMEOUT_MS = 1500L
         /** 顔フォーカスの最小間隔 (ms) — チラつき防止 */
         private const val FACE_FOCUS_THROTTLE_MS = 1500L
         /** 顔位置が大きく動いた時のみ再フォーカスする閾値 (正規化座標) */
@@ -43,14 +53,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(
         CameraUiState(
             shutterSoundEnabled = prefs.getBoolean(KEY_SHUTTER_SOUND, true),
+            autoProcessEnabled = prefs.getBoolean(KEY_AUTO_PROCESS, true),
         )
     )
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
     private var cameraController: CameraController? = null
+    // PreviewView / LifecycleOwner は画面に属するので、画面が破棄されたら detachPreview() で手放す
     private var previewViewRef: PreviewView? = null
     private var lifecycleOwnerRef: LifecycleOwner? = null
     private var aiAnalysisJob: Job? = null
+    /** AIモードで最後に判定されたシーンに対するおすすめ補正設定 */
+    private var aiProcessingConfig: ImageProcessor.ProcessingConfig? = null
     private var burstJob: Job? = null
     private val shutterSound = MediaActionSound().apply {
         load(MediaActionSound.SHUTTER_CLICK)
@@ -63,7 +77,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun startCamera(context: Context, lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
         if (cameraController == null) {
-            cameraController = CameraController(context).apply {
+            // CameraController は applicationContext だけを保持する (Activity をリークしない)
+            cameraController = CameraController(context.applicationContext).apply {
                 onPreviewStarted = {
                     _uiState.update { it.copy(isPreviewActive = true) }
                 }
@@ -105,6 +120,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 onCapabilitiesReady = { caps ->
                     _uiState.update { it.copy(capabilities = caps) }
                 }
+                // メインスレッドで呼ばれる (CameraController 側で載せ替え済み)
                 onFacesDetected = { faces ->
                     handleFacesDetected(faces)
                 }
@@ -125,6 +141,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * 画面 (CameraScreen) が破棄されたときに呼ぶ。
+     * 古い PreviewView / LifecycleOwner (= Activity) を持ち続けないようにする。
+     */
+    fun detachPreview(previewView: PreviewView) {
+        if (previewViewRef === previewView) {
+            previewViewRef = null
+            lifecycleOwnerRef = null
+        }
+    }
+
     fun capturePhoto() {
         if (_uiState.value.isCaptureInProgress) return
         _uiState.update { it.copy(isCaptureInProgress = true) }
@@ -133,12 +160,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             shutterSound.play(MediaActionSound.SHUTTER_CLICK)
         }
 
-        if (_uiState.value.captureMode == CaptureMode.NIGHT) {
-            captureNightMode()
-        } else if (_uiState.value.outputFormat == OutputFormat.RAW_DNG) {
-            captureRawPhoto()
-        } else {
-            cameraController?.capturePhoto()
+        val state = _uiState.value
+        when {
+            state.captureMode == CaptureMode.NIGHT -> captureNightMode()
+            state.captureMode == CaptureMode.HDR -> captureHdrMode()
+            state.outputFormat == OutputFormat.RAW_DNG -> captureRawPhoto()
+            state.autoProcessEnabled -> captureWithAutoProcess()
+            else -> cameraController?.capturePhoto()
+                ?: _uiState.update { it.copy(isCaptureInProgress = false) }
         }
     }
 
@@ -160,63 +189,253 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController?.captureRawPhoto(lifecycle, previewView, manualSettings)
     }
 
+    /**
+     * 通常撮影 + 自動補正。
+     * 撮影した画像に補正をかけてから保存する。AIモードでは判定したシーンに合わせた補正を使う。
+     */
+    private fun captureWithAutoProcess() {
+        val controller = cameraController ?: run {
+            _uiState.update { it.copy(isCaptureInProgress = false) }
+            return
+        }
+        val config = if (_uiState.value.captureMode == CaptureMode.AI_AUTO) {
+            aiProcessingConfig ?: ImageProcessor.ProcessingConfig()
+        } else {
+            ImageProcessor.ProcessingConfig()
+        }
+
+        viewModelScope.launch {
+            try {
+                val frame = controller.captureFrame()
+                _uiState.update { it.copy(postProcessing = true) }
+                val saved = withContext(Dispatchers.Default) {
+                    processAndSave(controller, frame, "GoodCam") { ImageProcessor.process(it, config) }
+                }
+                onProcessedSaved(saved)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Log.e(TAG, "Capture with auto process failed", t)
+                _uiState.update { it.copy(errorMessage = "撮影に失敗しました: ${describe(t)}") }
+            } finally {
+                _uiState.update { it.copy(isCaptureInProgress = false, postProcessing = false) }
+            }
+        }
+    }
+
     private fun captureNightMode() {
+        val controller = cameraController ?: run {
+            _uiState.update { it.copy(isCaptureInProgress = false) }
+            return
+        }
         val frameCount = _uiState.value.nightFrameCount
         _uiState.update { it.copy(nightCapturedFrames = 0, nightProcessing = false) }
 
-        cameraController?.captureNightFrames(
-            frameCount = frameCount,
-            onFrameCaptured = { count ->
-                _uiState.update { it.copy(nightCapturedFrames = count) }
-            },
-            onAllFrames = { frames ->
-                if (frames.isEmpty()) {
-                    _uiState.update { it.copy(
-                        isCaptureInProgress = false,
-                        errorMessage = "ナイトモード撮影に失敗しました",
-                    ) }
-                    return@captureNightFrames
+        viewModelScope.launch {
+            try {
+                // フレームスタッキング (1枚撮るごとに足し込み、すぐ解放する)
+                val stacked = captureAndStackNightFrames(controller, frameCount)
+                if (stacked == null) {
+                    _uiState.update { it.copy(errorMessage = "ナイトモード撮影に失敗しました") }
+                    return@launch
                 }
                 _uiState.update { it.copy(nightProcessing = true) }
 
-                viewModelScope.launch(Dispatchers.Default) {
-                    try {
-                        // フレームスタッキング
-                        val stacked = FrameStacker.stack(frames)
-                        frames.forEach { it.recycle() }
-
-                        // ナイトモード後処理
-                        val processed = ImageProcessor.processNight(stacked)
-                        if (processed !== stacked) stacked.recycle()
-
-                        // 保存
-                        val path = cameraController?.saveBitmapToGallery(processed)
-                        processed.recycle()
-
-                        _uiState.update { it.copy(
-                            isCaptureInProgress = false,
-                            nightCapturedFrames = 0,
-                            nightProcessing = false,
-                            lastCapturedPath = path,
-                        ) }
-                    } catch (e: Exception) {
-                        frames.forEach { it.recycle() }
-                        _uiState.update { it.copy(
-                            isCaptureInProgress = false,
-                            nightCapturedFrames = 0,
-                            nightProcessing = false,
-                            errorMessage = "ナイトモード処理に失敗: ${e.message}",
-                        ) }
-                    }
+                // ナイトモード後処理 → 保存
+                val saved = withContext(Dispatchers.Default) {
+                    processAndSave(controller, stacked, "GoodCam_Night") { ImageProcessor.processNight(it) }
                 }
-            },
-        )
+                onProcessedSaved(saved)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // OutOfMemoryError も含めて受け止め、アプリを落とさない
+                Log.e(TAG, "Night mode failed", t)
+                _uiState.update { it.copy(errorMessage = "ナイトモード処理に失敗: ${describe(t)}") }
+            } finally {
+                _uiState.update { it.copy(
+                    isCaptureInProgress = false,
+                    nightCapturedFrames = 0,
+                    nightProcessing = false,
+                ) }
+            }
+        }
     }
 
-    fun switchCamera(context: Context, lifecycleOwner: LifecycleOwner, previewView: PreviewView) {
-        val useFront = !_uiState.value.usingFrontCamera
-        _uiState.update { it.copy(usingFrontCamera = useFront) }
-        cameraController?.startCamera(lifecycleOwner, previewView, useFront)
+    /**
+     * ナイトモードのフレームを撮影しながら平均化する。
+     * 撮影中に端末を回してサイズが変わったフレームは捨てる。
+     * @return 平均化した画像。1枚も撮れなかった場合は null
+     */
+    private suspend fun captureAndStackNightFrames(controller: CameraController, frameCount: Int): Bitmap? {
+        val accumulator = FrameStacker.Accumulator()
+        repeat(frameCount) {
+            val frame = try {
+                controller.captureFrame()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // エラーでも続行し、取得済みフレームで合成
+                Log.e(TAG, "Night frame capture failed", e)
+                null
+            }
+            if (frame != null) {
+                val added = withContext(Dispatchers.Default) {
+                    try {
+                        accumulator.add(frame)
+                    } finally {
+                        frame.recycle()
+                    }
+                }
+                if (!added) Log.w(TAG, "Night frame skipped (size changed during capture)")
+                _uiState.update { it.copy(nightCapturedFrames = accumulator.frameCount) }
+            }
+        }
+        return withContext(Dispatchers.Default) { accumulator.result() }
+    }
+
+    /**
+     * HDRモード: 露出を変えて (暗い・普通・明るい) 撮影し、1枚に合成する。
+     * 露出補正に対応していない端末では、通常撮影 + 自動補正にする。
+     */
+    private fun captureHdrMode() {
+        val controller = cameraController ?: run {
+            _uiState.update { it.copy(isCaptureInProgress = false) }
+            return
+        }
+        if (controller.exposureCompensationStepEv <= 0f ||
+            controller.exposureCompensationRange.first == controller.exposureCompensationRange.last
+        ) {
+            Log.w(TAG, "Exposure compensation not supported; HDR falls back to single capture")
+            captureWithAutoProcess()
+            return
+        }
+        _uiState.update { it.copy(hdrCapturedFrames = 0) }
+
+        viewModelScope.launch {
+            try {
+                val merged = captureAndMergeHdrFrames(controller)
+                if (merged == null) {
+                    _uiState.update { it.copy(errorMessage = "HDR撮影に失敗しました") }
+                    return@launch
+                }
+                _uiState.update { it.copy(postProcessing = true) }
+                val saved = withContext(Dispatchers.Default) {
+                    processAndSave(controller, merged, "GoodCam_HDR") { ImageProcessor.postProcessHdr(it) }
+                }
+                onProcessedSaved(saved)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Log.e(TAG, "HDR capture failed", t)
+                _uiState.update { it.copy(errorMessage = "HDR処理に失敗: ${describe(t)}") }
+            } finally {
+                _uiState.update { it.copy(
+                    isCaptureInProgress = false,
+                    hdrCapturedFrames = 0,
+                    postProcessing = false,
+                ) }
+            }
+        }
+    }
+
+    /**
+     * 露出ブラケット撮影を行い、撮りながらHDR合成する。
+     * 撮影後は露出補正を元の値に戻す。
+     */
+    private suspend fun captureAndMergeHdrFrames(controller: CameraController): Bitmap? {
+        val stepEv = controller.exposureCompensationStepEv
+        val range = controller.exposureCompensationRange
+        val originalIndex = controller.exposureCompensationIndex
+        val bracketSteps = (HDR_BRACKET_EV / stepEv).roundToInt().coerceAtLeast(1)
+        // 暗い → 普通 → 明るい の順。範囲外は端に寄せ、重複は除く
+        val indices = listOf(-bracketSteps, 0, bracketSteps)
+            .map { (originalIndex + it).coerceIn(range) }
+            .distinct()
+
+        var merger: HdrToneMapper.Merger? = null
+        try {
+            for ((n, index) in indices.withIndex()) {
+                withTimeoutOrNull(EXPOSURE_SETTLE_TIMEOUT_MS) {
+                    controller.setExposureCompensationAndAwait(index)
+                }
+                // 新しい露出のフレームが確実に届くよう少し待つ
+                delay(100)
+                val frame = controller.captureFrame()
+                val ev = (index - originalIndex) * stepEv
+                withContext(Dispatchers.Default) {
+                    try {
+                        val m = merger ?: HdrToneMapper.Merger(frame.width, frame.height)
+                            .also { merger = it }
+                        if (!m.add(frame, ev)) {
+                            Log.w(TAG, "HDR frame skipped (size changed during capture)")
+                        }
+                    } finally {
+                        frame.recycle()
+                    }
+                }
+                _uiState.update { it.copy(hdrCapturedFrames = n + 1) }
+            }
+        } finally {
+            controller.setExposureCompensation(originalIndex)
+        }
+
+        val m = merger ?: return null
+        return withContext(Dispatchers.Default) { m.toneMap(ImageProcessor.HDR_SATURATION) }
+    }
+
+    /** 補正後に保存した結果 */
+    private data class SavedResult(val path: String?, val processed: Boolean)
+
+    /**
+     * 画像に補正をかけて保存する (Dispatchers.Default で呼ぶこと)。
+     * メモリ不足で補正できなかった場合は、補正前の画像を保存する。
+     * 渡した source は必ず解放される。
+     */
+    private fun processAndSave(
+        controller: CameraController,
+        source: Bitmap,
+        prefix: String,
+        process: (Bitmap) -> Bitmap,
+    ): SavedResult {
+        val processed = try {
+            process(source)
+        } catch (oom: OutOfMemoryError) {
+            Log.e(TAG, "Out of memory while processing; saving unprocessed image", oom)
+            null
+        }
+        return try {
+            val toSave = processed ?: source
+            SavedResult(controller.saveBitmapToGallery(toSave, prefix), processed != null)
+        } finally {
+            if (processed != null && processed !== source) processed.recycle()
+            source.recycle()
+        }
+    }
+
+    private fun onProcessedSaved(saved: SavedResult) {
+        _uiState.update { state ->
+            when {
+                saved.path == null -> state.copy(errorMessage = "写真の保存に失敗しました")
+                !saved.processed -> state.copy(
+                    lastCapturedPath = saved.path,
+                    errorMessage = "メモリ不足のため、補正なしで保存しました",
+                )
+                else -> state.copy(lastCapturedPath = saved.path)
+            }
+        }
+    }
+
+    private fun describe(t: Throwable): String =
+        if (t is OutOfMemoryError) "メモリ不足" else (t.message ?: t.javaClass.simpleName)
+
+    /**
+     * フロント/リアを切り替える。
+     * カメラの付け直しは CameraScreen の LaunchedEffect(usingFrontCamera) が行う
+     * (ここでも呼ぶと2回付け直しになり、ちらつく)。
+     */
+    fun switchCamera() {
+        _uiState.update { it.copy(usingFrontCamera = !it.usingFrontCamera) }
     }
 
     fun setCaptureMode(mode: CaptureMode) {
@@ -287,6 +506,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             SceneDetector.analyze(bitmap)
                         }
                         bitmap.recycle()
+                        aiProcessingConfig = SceneDetector.recommendSettings(analysis).processingConfig
                         _uiState.update { it.copy(
                             aiDetectedScene = analysis.sceneType.label,
                             aiConfidence = analysis.confidence,
@@ -310,6 +530,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun stopAiAnalysisLoop() {
         aiAnalysisJob?.cancel()
         aiAnalysisJob = null
+        aiProcessingConfig = null
         // 顔検出も停止
         cameraController?.disableFaceDetection()
         _uiState.update { it.copy(
@@ -405,6 +626,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         prefs.edit().putBoolean(KEY_SHUTTER_SOUND, enabled).apply()
     }
 
+    fun setAutoProcessEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(autoProcessEnabled = enabled) }
+        prefs.edit().putBoolean(KEY_AUTO_PROCESS, enabled).apply()
+    }
+
     fun navigateTo(screen: AppScreen) {
         _uiState.update { it.copy(currentScreen = screen) }
     }
@@ -497,27 +723,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(
             isBurstActive = true,
             burstCount = 0,
-            burstSavedPaths = emptyList(),
         ) }
 
         burstJob = viewModelScope.launch {
             var index = 1
             while (isActive && _uiState.value.isBurstActive) {
+                val controller = cameraController ?: break
                 if (_uiState.value.shutterSoundEnabled) {
                     shutterSound.play(MediaActionSound.SHUTTER_CLICK)
                 }
-                cameraController?.captureBurstPhoto(burstId, index) { path ->
+                // 1枚の保存が終わってから次を撮る (保存が遅い端末で撮影待ちが溜まらないように)
+                val path = controller.captureBurstPhoto(burstId, index)
+                if (path != null) {
                     _uiState.update { state ->
                         state.copy(
                             burstCount = state.burstCount + 1,
-                            burstSavedPaths = state.burstSavedPaths + path,
                             lastCapturedPath = path,
                         )
                     }
+                } else {
+                    // 失敗が続いても空回りしないよう少し待つ
+                    delay(200)
                 }
                 index++
-                // ZSLでも保存I/Oがあるため少し間隔をあける
-                delay(200)
             }
         }
         Log.d(TAG, "Burst started (burstId=$burstId)")

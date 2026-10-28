@@ -87,7 +87,6 @@ data class CameraUiState(
     // Burst Mode
     val isBurstActive: Boolean = false,
     val burstCount: Int = 0,
-    val burstSavedPaths: List<String> = emptyList(),
     // Focus
     val focusLocked: Boolean = false,
     // Macro
@@ -96,6 +95,11 @@ data class CameraUiState(
     // Night Mode
     val nightCapturedFrames: Int = 0,
     val nightProcessing: Boolean = false,
+    // HDR Mode
+    val hdrCapturedFrames: Int = 0,
+    // 撮影後の自動補正 (ON/OFF 設定と、補正処理中かどうか)
+    val autoProcessEnabled: Boolean = true,
+    val postProcessing: Boolean = false,
     // Face Detection
     val faceDetectionActive: Boolean = false,
     val detectedFaces: List<NormalizedFace> = emptyList(),

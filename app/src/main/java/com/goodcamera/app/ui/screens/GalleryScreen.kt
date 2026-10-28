@@ -1,13 +1,21 @@
 package com.goodcamera.app.ui.screens
 
+import android.app.Activity
+import android.app.RecoverableSecurityException
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +50,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class GalleryItem(
@@ -48,7 +58,21 @@ data class GalleryItem(
     val id: Long,
     val name: String,
     val dateModified: Long,
-)
+    val mimeType: String?,
+) {
+    /** DNG (RAW) は BitmapFactory で読めないので補正画面の対象外 */
+    val isEditable: Boolean get() = mimeType != "image/x-adobe-dng"
+}
+
+/** 写真削除の結果 */
+private sealed interface DeleteOutcome {
+    object Deleted : DeleteOutcome
+    /** ユーザーの許可が必要 (Android 10 以降で、このアプリが作った記録になっていない写真など) */
+    class NeedsUserConsent(val intentSender: IntentSender) : DeleteOutcome
+    class Failed(val reason: String) : DeleteOutcome
+}
+
+private const val TAG = "GalleryScreen"
 
 /**
  * ギャラリー画面 - GoodCameraで撮影した写真を一覧表示
@@ -66,6 +90,38 @@ fun GalleryScreen(
     var photos by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     var selectedIndex by remember { mutableIntStateOf(-1) }
     var isLoading by remember { mutableStateOf(true) }
+    /** 補正画面 (ReviewScreen) で開いている写真 */
+    var editingItem by remember { mutableStateOf<GalleryItem?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun removeFromList(item: GalleryItem) {
+        photos = photos.filter { it.id != item.id }
+        if (photos.isEmpty()) selectedIndex = -1
+    }
+
+    // 削除にユーザーの許可が必要な場合の確認ダイアログ
+    var pendingDelete by remember { mutableStateOf<GalleryItem?>(null) }
+    val deleteConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        val item = pendingDelete
+        pendingDelete = null
+        if (result.resultCode != Activity.RESULT_OK || item == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val deleted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // createDeleteRequest は許可された時点でシステムが削除済み
+                true
+            } else {
+                // Android 10: 許可をもらったので、もう一度削除する
+                withContext(Dispatchers.IO) { tryDeletePhoto(context, item.uri) } is DeleteOutcome.Deleted
+            }
+            if (deleted) {
+                removeFromList(item)
+            } else {
+                Toast.makeText(context, "削除できませんでした", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // 写真一覧を読み込む
     LaunchedEffect(Unit) {
@@ -77,6 +133,28 @@ fun GalleryScreen(
         if (startWithLatestPhoto && photos.isNotEmpty()) {
             selectedIndex = 0
         }
+    }
+
+    // 補正画面
+    editingItem?.let { item ->
+        ReviewScreen(
+            imagePath = item.uri.toString(),
+            onBack = { editingItem = null },
+            onSaved = { savedPath ->
+                if (savedPath == null) {
+                    Toast.makeText(context, "保存に失敗しました", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "補正した写真を保存しました", Toast.LENGTH_SHORT).show()
+                    scope.launch {
+                        photos = withContext(Dispatchers.IO) { loadGoodCameraPhotos(context) }
+                        // 保存した写真は一番新しいので先頭に表示する
+                        selectedIndex = if (photos.isEmpty()) -1 else 0
+                        editingItem = null
+                    }
+                }
+            },
+        )
+        return
     }
 
     // 写真の詳細表示（スワイプ対応）
@@ -95,13 +173,27 @@ fun GalleryScreen(
             onNavigateToCamera = onBack,
             onPinchOut = { selectedIndex = -1 },
             onDelete = { item ->
-                context.contentResolver.delete(item.uri, null, null)
-                photos = photos.filter { it.id != item.id }
-                if (photos.isEmpty()) selectedIndex = -1
+                scope.launch {
+                    when (val outcome = withContext(Dispatchers.IO) { tryDeletePhoto(context, item.uri) }) {
+                        is DeleteOutcome.Deleted -> removeFromList(item)
+                        is DeleteOutcome.NeedsUserConsent -> {
+                            pendingDelete = item
+                            deleteConsentLauncher.launch(
+                                IntentSenderRequest.Builder(outcome.intentSender).build(),
+                            )
+                        }
+                        is DeleteOutcome.Failed -> {
+                            Log.w(TAG, "Delete failed: ${outcome.reason}")
+                            Toast.makeText(context, "削除できませんでした", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             },
+            onEdit = { item -> editingItem = item },
             onShare = { item ->
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "image/jpeg"
+                    // DNG なども共有するので、実際の種類を使う
+                    type = item.mimeType ?: context.contentResolver.getType(item.uri) ?: "image/*"
                     putExtra(Intent.EXTRA_STREAM, item.uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
@@ -229,6 +321,7 @@ private fun PhotoDetailScreen(
     onNavigateToCamera: () -> Unit,
     onPinchOut: () -> Unit,
     onDelete: (GalleryItem) -> Unit,
+    onEdit: (GalleryItem) -> Unit,
     onShare: (GalleryItem) -> Unit,
 ) {
     // ページ0を撮影モードへの遷移用仮想ページとして確保し、写真は1始まりにする
@@ -318,6 +411,11 @@ private fun PhotoDetailScreen(
             }
             if (currentItem != null) {
                 Row {
+                    if (currentItem.isEditable) {
+                        IconButton(onClick = { onEdit(currentItem) }) {
+                            Icon(Icons.Filled.Tune, "補正", tint = Color.White)
+                        }
+                    }
                     IconButton(onClick = { onShare(currentItem) }) {
                         Icon(Icons.Filled.Share, "共有", tint = Color.White)
                     }
@@ -442,6 +540,7 @@ private fun loadGoodCameraPhotos(context: Context): List<GalleryItem> {
         MediaStore.Images.Media._ID,
         MediaStore.Images.Media.DISPLAY_NAME,
         MediaStore.Images.Media.DATE_MODIFIED,
+        MediaStore.Images.Media.MIME_TYPE,
     )
 
     val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -464,6 +563,7 @@ private fun loadGoodCameraPhotos(context: Context): List<GalleryItem> {
         val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
         val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
         val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
+        val mimeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
 
         while (cursor.moveToNext()) {
             val id = cursor.getLong(idColumn)
@@ -471,9 +571,35 @@ private fun loadGoodCameraPhotos(context: Context): List<GalleryItem> {
             val dateModified = cursor.getLong(dateColumn)
             val uri = ContentUris.withAppendedId(collection, id)
 
-            photos.add(GalleryItem(uri, id, name, dateModified))
+            val mimeType = cursor.getString(mimeColumn)
+
+            photos.add(GalleryItem(uri, id, name, dateModified, mimeType))
         }
     }
 
     return photos
+}
+
+/**
+ * 写真を削除する (IO スレッドで呼ぶこと)。
+ * 自分で作った記録になっていない写真は SecurityException になるので、
+ * Android 10 以降はユーザーに許可を求めるための IntentSender を返す。
+ */
+private fun tryDeletePhoto(context: Context, uri: Uri): DeleteOutcome {
+    return try {
+        if (context.contentResolver.delete(uri, null, null) > 0) {
+            DeleteOutcome.Deleted
+        } else {
+            DeleteOutcome.Failed("not found")
+        }
+    } catch (e: SecurityException) {
+        when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> DeleteOutcome.NeedsUserConsent(
+                MediaStore.createDeleteRequest(context.contentResolver, listOf(uri)).intentSender,
+            )
+            Build.VERSION.SDK_INT == Build.VERSION_CODES.Q && e is RecoverableSecurityException ->
+                DeleteOutcome.NeedsUserConsent(e.userAction.actionIntent.intentSender)
+            else -> DeleteOutcome.Failed(e.message ?: "permission denied")
+        }
+    }
 }

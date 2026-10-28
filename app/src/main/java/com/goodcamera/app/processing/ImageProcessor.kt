@@ -39,70 +39,89 @@ object ImageProcessor {
 
     /**
      * 標準後処理パイプラインを適用
+     *
+     * @param checkCancelled 各ステップの間に呼ばれる。中断したい場合は例外を投げる
+     *        (例: コルーチンの ensureActive())。
      */
-    fun process(bitmap: Bitmap, config: ProcessingConfig = ProcessingConfig()): Bitmap {
+    fun process(
+        bitmap: Bitmap,
+        config: ProcessingConfig = ProcessingConfig(),
+        checkCancelled: () -> Unit = {},
+    ): Bitmap {
         var result = bitmap
-
-        // Step 1: 自動ホワイトバランス補正（色かぶりを最初に除去）
-        if (config.autoWbEnabled) {
-            val wbCorrected = WhiteBalanceCorrector.correct(result)
-            if (result !== bitmap) result.recycle()
-            result = wbCorrected
-        }
-
-        // Step 2: かすみ除去（Dark Channel Priorベース）
-        if (config.dehazeEnabled) {
-            val dehazed = DehazeFilter.dehaze(result, strength = config.dehazeStrength)
-            if (result !== bitmap) result.recycle()
-            result = dehazed
-        }
-
-        // Step 3: ノイズリダクション
-        if (config.denoiseEnabled) {
-            val strength = config.denoiseStrength
-            val denoised = NoiseReduction.bilateralFilter(
-                result,
-                radius = strength.radius,
-                sigmaSpace = strength.sigmaSpace,
-                sigmaColor = strength.sigmaColor,
-            )
-            if (result !== bitmap) result.recycle()
-            result = denoised
-        }
-
-        // Step 4: ブレ/ピンぼけ自動補正
-        if (config.deblurEnabled) {
-            val analysis = DeblurFilter.detectBlur(result)
-            if (analysis.blurLevel != DeblurFilter.BlurLevel.SHARP) {
-                val corrected = DeblurFilter.correctBlur(result, analysis)
+        try {
+            // Step 1: 自動ホワイトバランス補正（色かぶりを最初に除去）
+            checkCancelled()
+            if (config.autoWbEnabled) {
+                val wbCorrected = WhiteBalanceCorrector.correct(result)
                 if (result !== bitmap) result.recycle()
-                result = corrected
+                result = wbCorrected
             }
-        }
 
-        // Step 5: 自動レベル補正
-        if (config.autoLevelsEnabled) {
-            val adjusted = AutoLevels.autoContrast(result, config.autoLevelsClip)
-            if (result !== bitmap) result.recycle()
-            result = adjusted
-        }
+            // Step 2: かすみ除去（Dark Channel Priorベース）
+            checkCancelled()
+            if (config.dehazeEnabled) {
+                val dehazed = DehazeFilter.dehaze(result, strength = config.dehazeStrength)
+                if (result !== bitmap) result.recycle()
+                result = dehazed
+            }
 
-        // Step 6: 知覚補正（人間の目と脳に近い補正）
-        if (config.perceptualEnabled) {
-            val enhanced = PerceptualEnhancer.enhance(result)
-            if (result !== bitmap) result.recycle()
-            result = enhanced
-        }
+            // Step 3: ノイズリダクション
+            checkCancelled()
+            if (config.denoiseEnabled) {
+                val strength = config.denoiseStrength
+                val denoised = NoiseReduction.bilateralFilter(
+                    result,
+                    radius = strength.radius,
+                    sigmaSpace = strength.sigmaSpace,
+                    sigmaColor = strength.sigmaColor,
+                )
+                if (result !== bitmap) result.recycle()
+                result = denoised
+            }
 
-        // Step 7: シャープニング
-        if (config.sharpenEnabled) {
-            val sharpened = Sharpening.unsharpMask(
-                result,
-                amount = config.sharpenAmount,
-                threshold = 4,
-            )
+            // Step 4: ブレ/ピンぼけ自動補正
+            checkCancelled()
+            if (config.deblurEnabled) {
+                val analysis = DeblurFilter.detectBlur(result)
+                if (analysis.blurLevel != DeblurFilter.BlurLevel.SHARP) {
+                    val corrected = DeblurFilter.correctBlur(result, analysis)
+                    if (result !== bitmap) result.recycle()
+                    result = corrected
+                }
+            }
+
+            // Step 5: 自動レベル補正
+            checkCancelled()
+            if (config.autoLevelsEnabled) {
+                val adjusted = AutoLevels.autoContrast(result, config.autoLevelsClip)
+                if (result !== bitmap) result.recycle()
+                result = adjusted
+            }
+
+            // Step 6: 知覚補正（人間の目と脳に近い補正）
+            checkCancelled()
+            if (config.perceptualEnabled) {
+                val enhanced = PerceptualEnhancer.enhance(result)
+                if (result !== bitmap) result.recycle()
+                result = enhanced
+            }
+
+            // Step 7: シャープニング
+            checkCancelled()
+            if (config.sharpenEnabled) {
+                val sharpened = Sharpening.unsharpMask(
+                    result,
+                    amount = config.sharpenAmount,
+                    threshold = 4,
+                )
+                if (result !== bitmap) result.recycle()
+                result = sharpened
+            }
+        } catch (t: Throwable) {
+            // 中断・失敗時は途中結果を解放してから投げ直す
             if (result !== bitmap) result.recycle()
-            result = sharpened
+            throw t
         }
 
         return result
@@ -114,9 +133,20 @@ object ImageProcessor {
      */
     fun processHdr(frames: List<Bitmap>): Bitmap {
         // Reinhard トーンマッピングでHDR合成
-        val hdr = HdrToneMapper.mergeAndToneMap(frames, saturation = 1.15f)
+        val hdr = HdrToneMapper.mergeAndToneMap(frames, saturation = HDR_SATURATION)
+        val result = postProcessHdr(hdr)
+        if (result !== hdr) hdr.recycle()
+        return result
+    }
 
-        // HDR後は軽めの処理（合成時にノイズが平均化されているため）
+    /** HDR合成器で使う彩度 */
+    const val HDR_SATURATION = 1.15f
+
+    /**
+     * HDR合成済み画像への後処理
+     * HDR後は軽めの処理（合成時にノイズが平均化されているため）
+     */
+    fun postProcessHdr(hdr: Bitmap): Bitmap {
         return process(hdr, ProcessingConfig(
             denoiseEnabled = true,
             denoiseStrength = DenoiseStrength.LIGHT,

@@ -42,8 +42,19 @@ object MediaStoreSaver {
                     "GoodCamera",
                 )
                 dir.mkdirs()
+                // 同じ秒に2回保存すると同名になり上書きされるので、重ならない名前にする
+                val dot = filename.lastIndexOf('.')
+                val base = if (dot >= 0) filename.substring(0, dot) else filename
+                val ext = if (dot >= 0) filename.substring(dot) else ""
+                var file = File(dir, filename)
+                var n = 1
+                while (file.exists()) {
+                    file = File(dir, "${base}_$n$ext")
+                    n++
+                }
+                put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
                 @Suppress("DEPRECATION")
-                put(MediaStore.MediaColumns.DATA, File(dir, filename).absolutePath)
+                put(MediaStore.MediaColumns.DATA, file.absolutePath)
             }
         }
     }

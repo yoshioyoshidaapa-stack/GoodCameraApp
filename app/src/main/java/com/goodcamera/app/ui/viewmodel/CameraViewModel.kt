@@ -158,6 +158,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 古い PreviewView / LifecycleOwner (= Activity) を持ち続けないようにする。
      */
     fun detachPreview(previewView: PreviewView) {
+        cancelTimer()
         if (previewViewRef === previewView) {
             previewViewRef = null
             lifecycleOwnerRef = null
@@ -509,10 +510,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * (ここでも呼ぶと2回付け直しになり、ちらつく)。
      */
     fun switchCamera() {
+        cancelTimer()
         _uiState.update { it.copy(usingFrontCamera = !it.usingFrontCamera) }
     }
 
     fun setCaptureMode(mode: CaptureMode) {
+        cancelTimer()
         val prev = _uiState.value.captureMode
         _uiState.update { it.copy(captureMode = mode) }
 
@@ -706,6 +709,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun navigateTo(screen: AppScreen) {
+        // カウントダウン中に別の画面へ移ったら撮影しない
+        cancelTimer()
         _uiState.update { it.copy(currentScreen = screen) }
     }
 

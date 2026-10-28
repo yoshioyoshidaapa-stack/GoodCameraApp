@@ -55,7 +55,11 @@ private fun CameraAppContent() {
     val cameraPermissionState = rememberPermissionState(android.Manifest.permission.CAMERA)
 
     if (cameraPermissionState.status.isGranted) {
-        // Android 9 以前は DCIM への保存に書き込み権限が必要
+        val viewModel: CameraViewModel = viewModel()
+        val uiState by viewModel.uiState.collectAsState()
+
+        // Android 9 以前は DCIM への保存に書き込み権限が必要。
+        // 起動時に求め、拒否されたまま保存に失敗したらもう一度求める
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             val storagePermissionState =
                 rememberPermissionState(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -64,10 +68,12 @@ private fun CameraAppContent() {
                     storagePermissionState.launchPermissionRequest()
                 }
             }
+            LaunchedEffect(uiState.errorMessage) {
+                if (uiState.errorMessage != null && !storagePermissionState.status.isGranted) {
+                    storagePermissionState.launchPermissionRequest()
+                }
+            }
         }
-
-        val viewModel: CameraViewModel = viewModel()
-        val uiState by viewModel.uiState.collectAsState()
 
         when (uiState.currentScreen) {
             AppScreen.CAMERA -> {

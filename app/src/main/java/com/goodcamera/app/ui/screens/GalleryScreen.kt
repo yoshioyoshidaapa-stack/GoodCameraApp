@@ -77,6 +77,9 @@ private const val TAG = "GalleryScreen"
 /** サムネイルの長辺の上限 (px) */
 private const val THUMBNAIL_MAX_SIZE = 512
 
+/** 全画面表示の長辺の上限 (px)。高画素の写真を等倍で読んでメモリ不足にならないように */
+private const val FULLSCREEN_MAX_SIZE = 4096
+
 /**
  * ギャラリー画面 - GoodCameraで撮影した写真を一覧表示
  *
@@ -448,8 +451,8 @@ private fun ZoomableImage(
     LaunchedEffect(item.id) {
         bitmap = withContext(Dispatchers.IO) {
             try {
-                BitmapLoader.load(context, item.uri)
-            } catch (_: Exception) {
+                BitmapLoader.load(context, item.uri, FULLSCREEN_MAX_SIZE)
+            } catch (_: Throwable) {
                 null
             }
         }

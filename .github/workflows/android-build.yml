@@ -1,0 +1,33 @@
+name: Androidアプリをビルド
+
+on:
+  push:
+    paths-ignore:
+      - "mcp-server/**"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # テストより先にAPKを作り、テストが失敗してもAPKは取り出せるようにする
+      - name: APKを作る
+        run: ./gradlew assembleDebug
+
+      - name: APKをダウンロードできるようにする
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoodCamera-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: テスト
+        run: ./gradlew testDebugUnitTest

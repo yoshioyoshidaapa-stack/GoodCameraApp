@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import java.io.File
 import java.io.IOException
 import java.io.OutputStream
 
@@ -21,6 +22,33 @@ object MediaStoreSaver {
     private val RELATIVE_DIR = Environment.DIRECTORY_DCIM + "/GoodCamera"
 
     /**
+     * DCIM/GoodCamera に画像を作るための ContentValues。
+     * Android 9 以前は RELATIVE_PATH が無いので、保存先のファイルパス (DATA) を直接指定する
+     * (指定しないと Pictures/ に保存され、ギャラリー画面に出てこない)。
+     *
+     * @param pending true なら Android 10 以降で IS_PENDING を立てる
+     */
+    fun newImageValues(filename: String, mimeType: String, pending: Boolean = false): ContentValues {
+        return ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, RELATIVE_DIR)
+                if (pending) put(MediaStore.MediaColumns.IS_PENDING, 1)
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                    "GoodCamera",
+                )
+                dir.mkdirs()
+                @Suppress("DEPRECATION")
+                put(MediaStore.MediaColumns.DATA, File(dir, filename).absolutePath)
+            }
+        }
+    }
+
+    /**
      * ストリームに書き込んで保存し、保存先 URI を文字列で返す。
      * 失敗時は例外を投げる (作成済みの項目は削除される)。
      */
@@ -31,14 +59,7 @@ object MediaStoreSaver {
         write: (OutputStream) -> Unit,
     ): String {
         val resolver = context.contentResolver
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, RELATIVE_DIR)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-        }
+        val values = newImageValues(filename, mimeType, pending = true)
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             ?: throw IOException("MediaStore insert failed: $filename")
 

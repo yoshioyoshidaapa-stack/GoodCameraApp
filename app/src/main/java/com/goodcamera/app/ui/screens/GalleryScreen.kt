@@ -6,7 +6,6 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -49,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.goodcamera.app.util.BitmapLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,6 +73,9 @@ private sealed interface DeleteOutcome {
 }
 
 private const val TAG = "GalleryScreen"
+
+/** サムネイルの長辺の上限 (px) */
+private const val THUMBNAIL_MAX_SIZE = 512
 
 /**
  * ギャラリー画面 - GoodCameraで撮影した写真を一覧表示
@@ -282,12 +285,8 @@ private fun GalleryThumbnail(
     LaunchedEffect(item.id) {
         thumbnail = withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openInputStream(item.uri)?.use { stream ->
-                    val options = BitmapFactory.Options().apply {
-                        inSampleSize = 4
-                    }
-                    BitmapFactory.decodeStream(stream, null, options)
-                }
+                // EXIF の向きを反映して縮小読み込み (CameraX の JPEG は EXIF で向きを持つ)
+                BitmapLoader.load(context, item.uri, THUMBNAIL_MAX_SIZE)
             } catch (_: Exception) {
                 null
             }
@@ -449,9 +448,7 @@ private fun ZoomableImage(
     LaunchedEffect(item.id) {
         bitmap = withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openInputStream(item.uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                }
+                BitmapLoader.load(context, item.uri)
             } catch (_: Exception) {
                 null
             }

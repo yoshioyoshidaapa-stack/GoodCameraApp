@@ -1,5 +1,6 @@
 package com.goodcamera.app
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -11,6 +12,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -53,6 +55,17 @@ private fun CameraAppContent() {
     val cameraPermissionState = rememberPermissionState(android.Manifest.permission.CAMERA)
 
     if (cameraPermissionState.status.isGranted) {
+        // Android 9 以前は DCIM への保存に書き込み権限が必要
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            val storagePermissionState =
+                rememberPermissionState(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            LaunchedEffect(Unit) {
+                if (!storagePermissionState.status.isGranted) {
+                    storagePermissionState.launchPermissionRequest()
+                }
+            }
+        }
+
         val viewModel: CameraViewModel = viewModel()
         val uiState by viewModel.uiState.collectAsState()
 

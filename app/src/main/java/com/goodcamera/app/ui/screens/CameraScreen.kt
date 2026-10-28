@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TimerOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -293,6 +295,31 @@ fun CameraScreen(
                 )
             }
 
+            // セルフタイマーボタン (OFF → 3秒 → 5秒 → 10秒)
+            IconButton(onClick = { viewModel.cycleTimer() }) {
+                if (uiState.timerSeconds > 0) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Timer,
+                            contentDescription = "セルフタイマー ${uiState.timerSeconds}秒",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "${uiState.timerSeconds}",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                } else {
+                    Icon(
+                        Icons.Filled.TimerOff,
+                        contentDescription = "セルフタイマー OFF",
+                        tint = Color.White.copy(alpha = 0.4f),
+                    )
+                }
+            }
+
             // 設定ボタン
             IconButton(onClick = { viewModel.navigateTo(AppScreen.SETTINGS) }) {
                 Icon(
@@ -368,6 +395,21 @@ fun CameraScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // セルフタイマーのカウントダウン
+        if (uiState.timerCountdown > 0) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "${uiState.timerCountdown}",
+                    color = Color.White,
+                    fontSize = 120.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
 
@@ -591,7 +633,7 @@ fun CameraScreen(
                 } else {
                     ShutterButton(
                         isCapturing = uiState.isCaptureInProgress,
-                        onClick = { viewModel.capturePhoto() },
+                        onClick = { viewModel.onShutterPressed() },
                     )
                 }
 

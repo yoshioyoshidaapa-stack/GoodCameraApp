@@ -68,6 +68,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** AIモードで最後に判定されたシーンに対するおすすめ補正設定 */
     private var aiProcessingConfig: ImageProcessor.ProcessingConfig? = null
     private var burstJob: Job? = null
+    private var timerJob: Job? = null
     private val shutterSound = MediaActionSound().apply {
         load(MediaActionSound.SHUTTER_CLICK)
     }
@@ -82,7 +83,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // CameraController は applicationContext だけを保持する (Activity をリークしない)
             cameraController = CameraController(context.applicationContext).apply {
                 onPreviewStarted = {
-                    _uiState.update { it.copy(isPreviewActive = true) }
+                    // カメラを付け直すと CameraController 側の顔検出は OFF に戻るので、
+                    // こちらの状態も合わせて戻す (次のシーン判定で再び ON になる)
+                    lastFaceFocusCenterX = -1f
+                    lastFaceFocusCenterY = -1f
+                    _uiState.update { it.copy(
+                        isPreviewActive = true,
+                        faceDetectionActive = false,
+                        detectedFaces = emptyList(),
+                        faceFocusLocked = false,
+                    ) }
                 }
                 onCaptureComplete = { path ->
                     _uiState.update { it.copy(
@@ -151,6 +161,55 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (previewViewRef === previewView) {
             previewViewRef = null
             lifecycleOwnerRef = null
+        }
+    }
+
+    /**
+     * シャッターボタンが押されたとき。
+     * セルフタイマーが設定されていればカウントダウン後に撮影する。
+     * カウントダウン中にもう一度押すと取り消す。
+     */
+    fun onShutterPressed() {
+        if (timerJob?.isActive == true) {
+            cancelTimer()
+            return
+        }
+        val seconds = _uiState.value.timerSeconds
+        if (seconds <= 0) {
+            capturePhoto()
+            return
+        }
+        if (_uiState.value.isCaptureInProgress) return
+        timerJob = viewModelScope.launch {
+            try {
+                for (remaining in seconds downTo 1) {
+                    _uiState.update { it.copy(timerCountdown = remaining) }
+                    delay(1000)
+                }
+            } finally {
+                _uiState.update { it.copy(timerCountdown = 0) }
+            }
+            capturePhoto()
+        }
+    }
+
+    private fun cancelTimer() {
+        timerJob?.cancel()
+        timerJob = null
+        _uiState.update { it.copy(timerCountdown = 0) }
+    }
+
+    /** セルフタイマーの秒数を 0(OFF) → 3 → 5 → 10 → 0 の順に切り替える */
+    fun cycleTimer() {
+        cancelTimer()
+        _uiState.update { state ->
+            val next = when (state.timerSeconds) {
+                0 -> 3
+                3 -> 5
+                5 -> 10
+                else -> 0
+            }
+            state.copy(timerSeconds = next)
         }
     }
 

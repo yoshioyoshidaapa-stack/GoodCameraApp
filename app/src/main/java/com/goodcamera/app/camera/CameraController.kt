@@ -1,6 +1,5 @@
 package com.goodcamera.app.camera
 
-import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -13,8 +12,6 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.Face
-import android.os.Build
-import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.view.OrientationEventListener
@@ -302,13 +299,7 @@ class CameraController(context: Context) {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val filename = "GoodCam_$timestamp.jpg"
 
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/GoodCamera")
-            }
-        }
+        val contentValues = MediaStoreSaver.newImageValues(filename, "image/jpeg")
 
         val outputOptions = ImageCapture.OutputFileOptions.Builder(
             context.contentResolver,
@@ -449,13 +440,7 @@ class CameraController(context: Context) {
 
         val filename = "GoodCam_Burst_${burstId}_${index.toString().padStart(3, '0')}.jpg"
 
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/GoodCamera")
-            }
-        }
+        val contentValues = MediaStoreSaver.newImageValues(filename, "image/jpeg")
 
         val outputOptions = ImageCapture.OutputFileOptions.Builder(
             context.contentResolver,

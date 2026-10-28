@@ -19,9 +19,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: テスト
-        run: ./gradlew testDebugUnitTest
-
+      # テストより先にAPKを作り、テストが失敗してもAPKは取り出せるようにする
       - name: APKを作る
         run: ./gradlew assembleDebug
 
@@ -30,3 +28,6 @@ jobs:
         with:
           name: GoodCamera-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: テスト
+        run: ./gradlew testDebugUnitTest

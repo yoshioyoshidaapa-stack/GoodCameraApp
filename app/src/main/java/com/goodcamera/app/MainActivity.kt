@@ -64,7 +64,6 @@ private fun CameraAppContent() {
                 GalleryScreen(
                     onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
                     startWithLatestPhoto = true,
-                    claudeApiKey = uiState.claudeApiKey,
                 )
             }
             AppScreen.SETTINGS -> {
@@ -73,8 +72,6 @@ private fun CameraAppContent() {
                     onGridTypeChanged = { viewModel.setGridType(it) },
                     shutterSoundEnabled = uiState.shutterSoundEnabled,
                     onShutterSoundChanged = { viewModel.setShutterSoundEnabled(it) },
-                    claudeApiKey = uiState.claudeApiKey,
-                    onClaudeApiKeyChanged = { viewModel.setClaudeApiKey(it) },
                     onBack = { viewModel.navigateTo(AppScreen.CAMERA) },
                 )
             }

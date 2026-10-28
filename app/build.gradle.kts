@@ -47,9 +47,6 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // Claude API SDK が使うライブラリ同士で重複するファイル
-            excludes += "/META-INF/{INDEX.LIST,DEPENDENCIES}"
-            excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
 }
@@ -80,9 +77,6 @@ dependencies {
 
     // ExifInterface for metadata
     implementation("androidx.exifinterface:exifinterface:1.3.7")
-
-    // Claude API (写真をClaudeに見てもらう機能)
-    implementation("com.anthropic:anthropic-java:3.3.0")
 
     // Accompanist permissions
     implementation("com.google.accompanist:accompanist-permissions:0.36.0")

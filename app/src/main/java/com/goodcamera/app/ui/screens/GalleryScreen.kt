@@ -1,5 +1,6 @@
 package com.goodcamera.app.ui.screens
 
+import android.content.ActivityNotFoundException
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
@@ -21,8 +22,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -43,10 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.goodcamera.app.ai.ClaudePhotoAdvisor
-import com.goodcamera.app.ai.PhotoForClaude
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class GalleryItem(
@@ -66,7 +62,6 @@ data class GalleryItem(
 fun GalleryScreen(
     onBack: () -> Unit,
     startWithLatestPhoto: Boolean = false,
-    claudeApiKey: String = "",
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -91,7 +86,6 @@ fun GalleryScreen(
         PhotoDetailScreen(
             photos = photos,
             initialIndex = selectedIndex,
-            claudeApiKey = claudeApiKey,
             onBack = {
                 if (startWithLatestPhoto && selectedIndex == 0) {
                     // 最新写真プレビューから戻る → カメラに戻る
@@ -115,6 +109,7 @@ fun GalleryScreen(
                 }
                 context.startActivity(Intent.createChooser(shareIntent, "共有"))
             },
+            onAskClaude = { item -> askClaudeApp(context, item.uri) },
         )
         return
     }
@@ -233,12 +228,12 @@ private fun GalleryThumbnail(
 private fun PhotoDetailScreen(
     photos: List<GalleryItem>,
     initialIndex: Int,
-    claudeApiKey: String,
     onBack: () -> Unit,
     onNavigateToCamera: () -> Unit,
     onPinchOut: () -> Unit,
     onDelete: (GalleryItem) -> Unit,
     onShare: (GalleryItem) -> Unit,
+    onAskClaude: (GalleryItem) -> Unit,
 ) {
     // ページ0を撮影モードへの遷移用仮想ページとして確保し、写真は1始まりにする
     val pagerState = rememberPagerState(
@@ -257,56 +252,6 @@ private fun PhotoDetailScreen(
     val photoIndex = pagerState.currentPage - 1
     val currentItem = photos.getOrNull(photoIndex)
     var showDeleteDialog by remember { mutableStateOf(false) }
-
-    // Claudeに写真を見てもらう
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var claudeAnswer by remember { mutableStateOf<String?>(null) }
-    var askingClaude by remember { mutableStateOf(false) }
-
-    fun askClaude(item: GalleryItem) {
-        askingClaude = true
-        claudeAnswer = null
-        scope.launch {
-            claudeAnswer = withContext(Dispatchers.IO) {
-                val jpeg = PhotoForClaude.loadJpeg(context, item.uri)
-                if (jpeg == null) {
-                    "写真を読み込めませんでした。"
-                } else {
-                    ClaudePhotoAdvisor.askAboutPhoto(claudeApiKey, jpeg)
-                }
-            }
-            askingClaude = false
-        }
-    }
-
-    if (askingClaude || claudeAnswer != null) {
-        AlertDialog(
-            onDismissRequest = { if (!askingClaude) claudeAnswer = null },
-            title = { Text("Claudeの回答") },
-            text = {
-                if (askingClaude) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("写真を見てもらっています…")
-                    }
-                } else {
-                    Text(
-                        text = claudeAnswer.orEmpty(),
-                        modifier = Modifier.verticalScroll(rememberScrollState()),
-                    )
-                }
-            },
-            confirmButton = {
-                if (!askingClaude) {
-                    TextButton(onClick = { claudeAnswer = null }) {
-                        Text("閉じる")
-                    }
-                }
-            },
-        )
-    }
 
     if (showDeleteDialog && currentItem != null) {
         AlertDialog(
@@ -377,10 +322,7 @@ private fun PhotoDetailScreen(
             }
             if (currentItem != null) {
                 Row {
-                    IconButton(
-                        onClick = { askClaude(currentItem) },
-                        enabled = !askingClaude,
-                    ) {
+                    IconButton(onClick = { onAskClaude(currentItem) }) {
                         Icon(Icons.Filled.AutoAwesome, "Claudeに聞く", tint = Color.White)
                     }
                     IconButton(onClick = { onShare(currentItem) }) {
@@ -496,6 +438,32 @@ private fun ZoomableImage(
                     },
             )
         } ?: CircularProgressIndicator(color = Color.White)
+    }
+}
+
+/** Claude の公式Androidアプリ */
+private const val CLAUDE_APP_PACKAGE = "com.anthropic.claude"
+
+private const val CLAUDE_QUESTION =
+    "この写真について、カメラに詳しくない人にも分かる日本語で教えてください。\n" +
+        "【写っているもの】2〜3文で\n" +
+        "【もっと良くするコツ】構図・明るさ・ピントなど、次に撮るときのコツを3つまで"
+
+/**
+ * 写真をClaudeアプリに送る（Claudeの月額プランや無料プランの範囲で使えるので、追加料金はかからない）
+ * Claudeアプリが入っていない場合は、送り先を選ぶ画面を出す
+ */
+private fun askClaudeApp(context: Context, uri: Uri) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "image/jpeg"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_TEXT, CLAUDE_QUESTION)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(Intent(intent).setPackage(CLAUDE_APP_PACKAGE))
+    } catch (_: ActivityNotFoundException) {
+        context.startActivity(Intent.createChooser(intent, "Claudeアプリが見つかりません。送り先を選んでください"))
     }
 }
 

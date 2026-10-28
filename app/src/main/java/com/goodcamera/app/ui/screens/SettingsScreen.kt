@@ -13,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.goodcamera.app.camera.GridType
@@ -24,8 +23,6 @@ fun SettingsScreen(
     onGridTypeChanged: (GridType) -> Unit,
     shutterSoundEnabled: Boolean,
     onShutterSoundChanged: (Boolean) -> Unit,
-    claudeApiKey: String,
-    onClaudeApiKeyChanged: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -88,44 +85,6 @@ fun SettingsScreen(
                             checked = shutterSoundEnabled,
                             onCheckedChange = onShutterSoundChanged,
                         )
-                    }
-                }
-
-                // Claude API セクション
-                SettingsSection(title = "Claude（AIに写真を見てもらう）") {
-                    var apiKeyInput by remember(claudeApiKey) { mutableStateOf(claudeApiKey) }
-                    Text(
-                        "Anthropic の API キー（sk-ant- で始まる文字列）を入力すると、" +
-                            "ギャラリーの写真をClaudeに見てもらえます。1回ごとに料金がかかります。",
-                        color = Color.Gray,
-                        fontSize = 12.sp,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = apiKeyInput,
-                        onValueChange = { apiKeyInput = it },
-                        label = { Text("Claude APIキー") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (claudeApiKey.isBlank()) "未設定" else "設定済み",
-                            color = if (claudeApiKey.isBlank()) Color.Gray else MaterialTheme.colorScheme.primary,
-                            fontSize = 13.sp,
-                        )
-                        Button(
-                            onClick = { onClaudeApiKeyChanged(apiKeyInput) },
-                            enabled = apiKeyInput.trim() != claudeApiKey,
-                        ) {
-                            Text("保存")
-                        }
                     }
                 }
 

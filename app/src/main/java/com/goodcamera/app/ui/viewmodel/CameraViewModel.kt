@@ -42,6 +42,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         private const val HDR_BRACKET_EV = 1f
         /** 露出補正を変えてから AE が落ち着くまで待つ最大時間 (ms) */
         private const val EXPOSURE_SETTLE_TIMEOUT_MS = 1500L
+        /** 露出が落ち着いた後、そのフレームが撮影に使われるまで待つ時間 (ms) */
+        private const val HDR_FRAME_SETTLE_MS = 300L
         /** 顔フォーカスの最小間隔 (ms) — チラつき防止 */
         private const val FACE_FOCUS_THROTTLE_MS = 1500L
         /** 顔位置が大きく動いた時のみ再フォーカスする閾値 (正規化座標) */
@@ -172,12 +174,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun captureRawPhoto() {
-        val previewView = previewViewRef ?: run {
-            _uiState.update { it.copy(isCaptureInProgress = false, errorMessage = "Preview not ready") }
-            return
-        }
-        val lifecycle = lifecycleOwnerRef ?: run {
-            _uiState.update { it.copy(isCaptureInProgress = false, errorMessage = "Lifecycle not ready") }
+        val controller = cameraController ?: run {
+            _uiState.update { it.copy(isCaptureInProgress = false) }
             return
         }
         _uiState.update { it.copy(rawCapturing = true) }
@@ -186,7 +184,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             !_uiState.value.settings.autoExposure
         ) _uiState.value.settings else null
 
-        cameraController?.captureRawPhoto(lifecycle, previewView, manualSettings)
+        controller.captureRawPhoto(manualSettings, onFinished = { restartCameraIfAttached() })
+    }
+
+    /**
+     * 今画面に出ている PreviewView でカメラを付け直す。
+     * 画面が無い (ギャラリー表示中など) ときは何もしない。次に画面が出たときに付け直される。
+     */
+    private fun restartCameraIfAttached() {
+        val previewView = previewViewRef ?: return
+        val lifecycleOwner = lifecycleOwnerRef ?: return
+        cameraController?.startCamera(lifecycleOwner, previewView, _uiState.value.usingFrontCamera)
     }
 
     /**
@@ -310,7 +318,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             captureWithAutoProcess()
             return
         }
-        _uiState.update { it.copy(hdrCapturedFrames = 0) }
+        _uiState.update { it.copy(hdrCapturedFrames = 0, hdrCapturing = true) }
 
         viewModelScope.launch {
             try {
@@ -319,7 +327,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update { it.copy(errorMessage = "HDR撮影に失敗しました") }
                     return@launch
                 }
-                _uiState.update { it.copy(postProcessing = true) }
+                _uiState.update { it.copy(postProcessing = true, hdrCapturing = false) }
                 val saved = withContext(Dispatchers.Default) {
                     processAndSave(controller, merged, "GoodCam_HDR") { ImageProcessor.postProcessHdr(it) }
                 }
@@ -333,6 +341,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.update { it.copy(
                     isCaptureInProgress = false,
                     hdrCapturedFrames = 0,
+                    hdrCapturing = false,
                     postProcessing = false,
                 ) }
             }
@@ -359,8 +368,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 withTimeoutOrNull(EXPOSURE_SETTLE_TIMEOUT_MS) {
                     controller.setExposureCompensationAndAwait(index)
                 }
-                // 新しい露出のフレームが確実に届くよう少し待つ
-                delay(100)
+                // ZSL は直近のフレームを使うため、新しい露出のフレームが
+                // バッファに入るまで数フレーム分待つ
+                delay(HDR_FRAME_SETTLE_MS)
                 val frame = controller.captureFrame()
                 val ev = (index - originalIndex) * stepEv
                 withContext(Dispatchers.Default) {
@@ -398,10 +408,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         prefix: String,
         process: (Bitmap) -> Bitmap,
     ): SavedResult {
+        // 補正に失敗しても撮った写真は失わないよう、補正前の画像を保存する
         val processed = try {
             process(source)
-        } catch (oom: OutOfMemoryError) {
-            Log.e(TAG, "Out of memory while processing; saving unprocessed image", oom)
+        } catch (t: Throwable) {
+            if (t is CancellationException) {
+                source.recycle()
+                throw t
+            }
+            Log.e(TAG, "Processing failed; saving unprocessed image", t)
             null
         }
         return try {
@@ -419,7 +434,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 saved.path == null -> state.copy(errorMessage = "写真の保存に失敗しました")
                 !saved.processed -> state.copy(
                     lastCapturedPath = saved.path,
-                    errorMessage = "メモリ不足のため、補正なしで保存しました",
+                    errorMessage = "補正できなかったため、補正なしで保存しました",
                 )
                 else -> state.copy(lastCapturedPath = saved.path)
             }

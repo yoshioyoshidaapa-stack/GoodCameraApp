@@ -333,10 +333,15 @@ class CameraController(context: Context) {
         )
     }
 
+    /**
+     * RAW+JPEG 撮影。撮影中は CameraX のバインドを外すので、
+     * 終わったら onFinished (メインスレッド) でカメラを付け直すこと。
+     * 付け直しは呼び出し側が「そのとき画面にある」PreviewView で行う
+     * (撮影開始時の PreviewView を持ち続けると、画面を離れた後に古い画面へ付け直してしまう)。
+     */
     fun captureRawPhoto(
-        lifecycleOwner: LifecycleOwner,
-        previewView: PreviewView,
         manualSettings: CameraSettings?,
+        onFinished: () -> Unit,
     ) {
         val cameraId = currentCameraId ?: run {
             onError?.invoke("Camera ID not available")
@@ -380,13 +385,13 @@ class CameraController(context: Context) {
             jpegOrientation = jpegOrientation,
             onResult = { result ->
                 mainExecutor.execute {
-                    startCamera(lifecycleOwner, previewView, isFrontCamera)
+                    onFinished()
                     onRawCaptureComplete?.invoke(result)
                 }
             },
             onError = { msg ->
                 mainExecutor.execute {
-                    startCamera(lifecycleOwner, previewView, isFrontCamera)
+                    onFinished()
                     onError?.invoke(msg)
                 }
             },
@@ -495,7 +500,8 @@ class CameraController(context: Context) {
                         return
                     }
                     if (bitmap != null) {
-                        cont.resume(bitmap)
+                        // 呼び出し側が既にキャンセルされていたら、受け取り手のいない Bitmap を解放する
+                        cont.resume(bitmap) { _ -> bitmap.recycle() }
                     } else {
                         cont.resumeWithException(IOException("Failed to decode captured image"))
                     }

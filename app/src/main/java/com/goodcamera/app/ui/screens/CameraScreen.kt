@@ -372,9 +372,7 @@ fun CameraScreen(
         }
 
         // HDR撮影中・自動補正中オーバーレイ
-        if (uiState.postProcessing ||
-            (uiState.captureMode == CaptureMode.HDR && uiState.isCaptureInProgress)
-        ) {
+        if (uiState.postProcessing || uiState.hdrCapturing) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

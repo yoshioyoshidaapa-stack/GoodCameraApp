@@ -189,7 +189,11 @@ fun GalleryScreen(
                     }
                 }
             },
-            onEdit = { item -> editingItem = item },
+            onEdit = { item ->
+                // 補正画面から戻ったとき、補正していた写真を表示するため
+                selectedIndex = photos.indexOf(item)
+                editingItem = item
+            },
             onShare = { item ->
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     // DNG なども共有するので、実際の種類を使う

@@ -97,6 +97,7 @@ data class CameraUiState(
     val nightProcessing: Boolean = false,
     // HDR Mode
     val hdrCapturedFrames: Int = 0,
+    val hdrCapturing: Boolean = false,
     // 撮影後の自動補正 (ON/OFF 設定と、補正処理中かどうか)
     val autoProcessEnabled: Boolean = true,
     val postProcessing: Boolean = false,

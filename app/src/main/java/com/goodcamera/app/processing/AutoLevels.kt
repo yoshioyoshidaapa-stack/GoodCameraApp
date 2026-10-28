@@ -122,18 +122,19 @@ object AutoLevels {
     }
 
     private fun findClipRange(histogram: IntArray, clipCount: Int): Pair<Int, Int> {
+        // 累積数が clipCount を超える最初の値を min とする（clipCount=0 なら実際の最小値）
         var min = 0
-        var sum = 0
-        while (min < 255 && sum < clipCount) {
-            sum += histogram[min]
+        var sum = histogram[0]
+        while (min < 255 && sum <= clipCount) {
             min++
+            sum += histogram[min]
         }
 
         var max = 255
-        sum = 0
-        while (max > 0 && sum < clipCount) {
-            sum += histogram[max]
+        sum = histogram[255]
+        while (max > 0 && sum <= clipCount) {
             max--
+            sum += histogram[max]
         }
 
         if (min >= max) {

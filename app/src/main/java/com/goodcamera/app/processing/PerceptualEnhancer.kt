@@ -145,15 +145,18 @@ object PerceptualEnhancer {
             for (x in 0 until width) {
                 val fx = (x.toFloat() / blockSize).coerceIn(0f, (dsW - 1).toFloat())
                 val fy = (y.toFloat() / blockSize).coerceIn(0f, (dsH - 1).toFloat())
-                val ix = fx.toInt().coerceAtMost(dsW - 2)
-                val iy = fy.toInt().coerceAtMost(dsH - 2)
+                // 画像がblockSize以下だと dsW/dsH が1になるため、隣接セルは端でクランプする
+                val ix = fx.toInt().coerceIn(0, (dsW - 2).coerceAtLeast(0))
+                val iy = fy.toInt().coerceIn(0, (dsH - 2).coerceAtLeast(0))
+                val ix1 = (ix + 1).coerceAtMost(dsW - 1)
+                val iy1 = (iy + 1).coerceAtMost(dsH - 1)
                 val dx = fx - ix
                 val dy = fy - iy
 
                 val v00 = smoothed[iy * dsW + ix]
-                val v10 = smoothed[iy * dsW + ix + 1]
-                val v01 = smoothed[(iy + 1) * dsW + ix]
-                val v11 = smoothed[(iy + 1) * dsW + ix + 1]
+                val v10 = smoothed[iy * dsW + ix1]
+                val v01 = smoothed[iy1 * dsW + ix]
+                val v11 = smoothed[iy1 * dsW + ix1]
 
                 result[y * width + x] = v00 * (1 - dx) * (1 - dy) +
                         v10 * dx * (1 - dy) +

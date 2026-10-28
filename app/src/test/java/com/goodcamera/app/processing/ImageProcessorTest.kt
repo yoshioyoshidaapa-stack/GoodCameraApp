@@ -71,11 +71,23 @@ class ImageProcessorTest {
             sharpenAmount = 1.5f,
             autoLevelsEnabled = false,
         )
-        val result = ImageProcessor.process(testBitmap, config)
+        // 共通のなだらかなグラデーション画像はぼかし画像との差が最大3で、ノイズ保護の
+        // threshold=4 を超えないためシャープニングされない。明確なエッジを持つ画像を使う。
+        val edgeBitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+        val edgePixels = IntArray(256)
+        for (y in 0 until 16) {
+            for (x in 0 until 16) {
+                val value = if (x < 8) 60 else 180
+                edgePixels[y * 16 + x] = (0xFF shl 24) or (value shl 16) or (value shl 8) or value
+            }
+        }
+        edgeBitmap.setPixels(edgePixels, 0, 16, 0, 0, 16, 16)
+
+        val result = ImageProcessor.process(edgeBitmap, config)
 
         val originalPixels = IntArray(256)
         val resultPixels = IntArray(256)
-        testBitmap.getPixels(originalPixels, 0, 16, 0, 0, 16, 16)
+        edgeBitmap.getPixels(originalPixels, 0, 16, 0, 0, 16, 16)
         result.getPixels(resultPixels, 0, 16, 0, 0, 16, 16)
 
         // シャープニング適用で何かが変わっている
@@ -87,6 +99,7 @@ class ImageProcessorTest {
             }
         }
         assertTrue("Sharpening should modify the image", changed)
+        edgeBitmap.recycle()
         result.recycle()
     }
 

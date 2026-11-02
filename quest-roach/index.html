@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ゴキブリシューター MR</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #f2f2f2; overflow: hidden;
+    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif; }
+  canvas { display: block; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 30%, #3a2414 0%, #120b07 70%); z-index: 10; padding: 16px; box-sizing: border-box; }
+  #card { max-width: 560px; width: 100%; text-align: center; }
+  h1 { font-size: clamp(32px, 7vw, 56px); margin: 0 0 8px; letter-spacing: 0.04em; color: #ffd36b;
+    text-shadow: 0 4px 0 #6b3514, 0 0 24px rgba(255, 180, 60, .35); }
+  p { line-height: 1.7; margin: 8px 0; color: #e8dccd; }
+  .btn { display: block; width: 100%; margin: 14px 0 0; padding: 18px; font-size: 22px; font-weight: bold;
+    border: 0; border-radius: 14px; cursor: pointer; font-family: inherit; }
+  #btnXR { background: #ffb02e; color: #2a1406; box-shadow: 0 6px 0 #9a5a10; }
+  #btnXR:disabled { background: #555; color: #999; box-shadow: none; cursor: not-allowed; }
+  #btnPC { background: #2f3a46; color: #e8eef5; box-shadow: 0 6px 0 #161c22; font-size: 18px; }
+  #status { font-size: 14px; color: #c9b8a5; min-height: 1.5em; }
+  ul { text-align: left; color: #e8dccd; line-height: 1.8; padding-left: 1.3em; }
+</style>
+</head>
+<body>
+<div id="overlay">
+  <div id="card">
+    <h1>ゴキブリシューター</h1>
+    <p>あなたの部屋にゴキブリが出た！<br>殺虫ブラスターで1匹残らず退治しろ。</p>
+    <ul>
+      <li>引き金（人差し指のトリガー）で撃つ</li>
+      <li>足元まで来られる／顔に飛んでこられるとライフが減る</li>
+      <li>ねらいを近づけると逃げる。羽音がしたら上を見ろ</li>
+    </ul>
+    <button id="btnXR" class="btn" disabled>確認中…</button>
+    <button id="btnPC" class="btn">PCでお試し（マウス）</button>
+    <p id="status"></p>
+  </div>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -718,7 +718,7 @@ function updateAim(aim) {
 // ---------------------------------------------------------------------------
 // ゴキブリ本体の動き
 // ---------------------------------------------------------------------------
-const MAX_LIVES = 5;
+const MAX_LIVES = 3; // ハードモード：ライフ3つ
 const roaches = [];
 
 class Roach {
@@ -737,8 +737,8 @@ class Roach {
     this.t = Math.random() * 10;
     this.hp = type === 'boss' ? 10 + G.wave * 2 : 1;
     this.maxHp = this.hp;
-    this.baseSpeed = type === 'boss' ? 0.12 : type === 'flyer' ? 0.17 : rand(0.13, 0.19);
-    this.flyDelay = type === 'flyer' ? rand(2.5, 7) : Infinity;
+    this.baseSpeed = type === 'boss' ? 0.16 : type === 'flyer' ? 0.24 : rand(0.2, 0.28);
+    this.flyDelay = type === 'flyer' ? rand(1.5, 4.5) : Infinity;
     this.minionT = 3;
     this.dead = false;
     this.deadT = 0;
@@ -802,7 +802,7 @@ class Roach {
     }
     if (dPlayer > 4.5 && !this.scatter) this.heading = lerpAngle(this.heading, toPlayer, 4 * dt);
 
-    const spd = this.state === 'pause' ? 0 : this.state === 'dash' ? this.speed() * 3.0 : this.speed();
+    const spd = this.state === 'pause' ? 0 : this.state === 'dash' ? this.speed() * 3.4 : this.speed();
     this.pos.x += Math.sin(this.heading) * spd * dt;
     this.pos.z += Math.cos(this.heading) * spd * dt;
 
@@ -876,7 +876,7 @@ class Roach {
   updateFly(dt) {
     _v1.copy(camPos).sub(this.pos);
     const d = _v1.length();
-    _v1.normalize().multiplyScalar(1.05 * G.speedMul);
+    _v1.normalize().multiplyScalar(1.3 * G.speedMul);
     if (this.scatter) { _v1.negate(); _v1.y = 0.6; }
     // ふらふら飛ぶ
     _v1.x += Math.sin(this.t * 3.1) * 0.8;
@@ -983,7 +983,7 @@ class Roach {
 
 function spawnRoach(type, x, z) {
   if (x === undefined) {
-    const a = Math.random() * TAU, d = type === 'boss' ? rand(2.4, 3.0) : rand(2.0, 3.2);
+    const a = Math.random() * TAU, d = type === 'boss' ? rand(2.0, 2.6) : rand(1.4, 2.8);
     x = camPos.x + Math.sin(a) * d;
     z = camPos.z + Math.cos(a) * d;
   }
@@ -1046,18 +1046,18 @@ function startGame() {
 function nextWave() {
   G.wave++;
   const n = G.wave;
-  G.speedMul = Math.min(2, 1 + (n - 1) * 0.1);
-  const count = 5 + n * 3;
-  const flyRatio = n >= 2 ? Math.min(0.4, 0.12 * n) : 0;
+  G.speedMul = Math.min(2.2, 1 + (n - 1) * 0.12);
+  const count = 10 + n * 4;
+  const flyRatio = Math.min(0.5, 0.2 + 0.08 * (n - 1)); // 最初から飛ぶ
   G.queue = [];
   for (let i = 0; i < count; i++) G.queue.push(Math.random() < flyRatio ? 'flyer' : 'normal');
-  const bossWave = n % 3 === 0;
+  const bossWave = n % 2 === 0; // 2WAVEごとにボス
   if (bossWave) G.queue.splice(2, 0, 'boss');
-  G.spawnInterval = Math.max(0.35, 1.3 - n * 0.1);
+  G.spawnInterval = Math.max(0.25, 0.8 - n * 0.08);
   G.spawnTimer = 0;
   G.waveDelay = 2.6;
   G.clearT = 0;
-  const sub = n === 1 ? ['ねらいを近づけると逃げるぞ', '足元まで来させるな！']
+  const sub = n === 1 ? ['ハードモード：最初から飛んでくるぞ', `${count}匹 ／ ライフは${MAX_LIVES}つだけ`]
     : bossWave ? ['巨大ゴキブリ「ゴキング」襲来！', `${count}匹 ＋ ボス`]
       : n === 2 ? ['羽音がしたら上を見ろ！', `${count}匹`] : [`${count}匹`, `スピード x${G.speedMul.toFixed(1)}`];
   showAnnounce(`WAVE ${n}`, sub, 2.5, bossWave ? '#ff6a4a' : '#ffd36b');

@@ -8,3 +8,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# ビルドの出力は保存しない
+build/

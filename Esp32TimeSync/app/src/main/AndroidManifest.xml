@@ -5,6 +5,11 @@
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
+    <!-- 近くの機器の登録機能を使う宣言（これがないと登録時に例外になる） -->
+    <uses-feature
+        android:name="android.software.companion_device_setup"
+        android:required="true" />
+
     <!-- 基板に接続して時刻を書き込む -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- 基板が近くに来たことを、アプリが閉じていても知らせてもらう -->

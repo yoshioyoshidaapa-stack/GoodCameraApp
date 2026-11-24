@@ -54,32 +54,63 @@ private fun hasConnectPermission(ctx: Context) =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) ==
         PackageManager.PERMISSION_GRANTED
 
+/** この端末で、基板の登録に必要な機能が使えるかを、日本語で説明する（診断用）。 */
+private fun diagnose(ctx: Context): String {
+    val pm = ctx.packageManager
+    val companion = pm.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)
+    val ble = pm.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
+    return "端末の診断: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) / " +
+        "BLE=${if (ble) "対応" else "非対応"} / " +
+        "コンパニオン機能=${if (companion) "対応" else "非対応"}"
+}
+
 private fun startAssociation(ctx: Context, launch: (IntentSender) -> Unit) {
-    val cdm = ctx.getSystemService(CompanionDeviceManager::class.java)
-    val filter = BluetoothLeDeviceFilter.Builder()
-        .setNamePattern(Pattern.compile(Regex.escape(Esp32Ble.DEVICE_NAME)))
-        .build()
-    val request = AssociationRequest.Builder()
-        .addDeviceFilter(filter)
-        .setSingleDevice(false)
-        .build()
-    val callback = object : CompanionDeviceManager.Callback() {
-        // Android 13 以降はこちらが呼ばれる
-        override fun onAssociationPending(intentSender: IntentSender) = launch(intentSender)
-
-        // Android 12 はこちらが呼ばれる
-        @Deprecated("Android 12 用")
-        override fun onDeviceFound(intentSender: IntentSender) = launch(intentSender)
-
-        override fun onFailure(error: CharSequence?) {
-            AppLog.add(ctx, "登録できませんでした: $error")
+    try {
+        val cdm = ctx.getSystemService(CompanionDeviceManager::class.java)
+        if (cdm == null || !ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)) {
+            AppLog.add(ctx, "この端末は、基板の自動登録の機能に対応していません。")
+            return
         }
-    }
-    if (Build.VERSION.SDK_INT >= 33) {
-        cdm.associate(request, ContextCompat.getMainExecutor(ctx), callback)
-    } else {
-        @Suppress("DEPRECATION")
-        cdm.associate(request, callback, null)
+        val filter = BluetoothLeDeviceFilter.Builder()
+            .setNamePattern(Pattern.compile(Regex.escape(Esp32Ble.DEVICE_NAME)))
+            .build()
+        val request = AssociationRequest.Builder()
+            .addDeviceFilter(filter)
+            .setSingleDevice(false)
+            .build()
+        val callback = object : CompanionDeviceManager.Callback() {
+            // Android 13 以降はこちらが呼ばれる
+            override fun onAssociationPending(intentSender: IntentSender) {
+                try {
+                    launch(intentSender)
+                } catch (e: Throwable) {
+                    AppLog.add(ctx, "登録画面を開けませんでした: $e")
+                }
+            }
+
+            // Android 12 はこちらが呼ばれる
+            @Deprecated("Android 12 用")
+            override fun onDeviceFound(intentSender: IntentSender) {
+                try {
+                    launch(intentSender)
+                } catch (e: Throwable) {
+                    AppLog.add(ctx, "登録画面を開けませんでした: $e")
+                }
+            }
+
+            override fun onFailure(error: CharSequence?) {
+                AppLog.add(ctx, "登録できませんでした: $error")
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            cdm.associate(request, ContextCompat.getMainExecutor(ctx), callback)
+        } else {
+            @Suppress("DEPRECATION")
+            cdm.associate(request, callback, null)
+        }
+        AppLog.add(ctx, "基板を探しています。基板の電源が入っているか確認してください")
+    } catch (e: Throwable) {
+        AppLog.add(ctx, "登録を始められませんでした: $e")
     }
 }
 
@@ -96,15 +127,20 @@ private fun App() {
             AppLog.add(ctx, "登録がキャンセルされました")
             return@rememberLauncherForActivityResult
         }
-        val found: String? = if (Build.VERSION.SDK_INT >= 33) {
-            result.data
-                ?.getParcelableExtra(CompanionDeviceManager.EXTRA_ASSOCIATION, AssociationInfo::class.java)
-                ?.deviceMacAddress?.toString()
-        } else {
-            @Suppress("DEPRECATION")
-            result.data
-                ?.getParcelableExtra<ScanResult>(CompanionDeviceManager.EXTRA_DEVICE)
-                ?.device?.address
+        val found: String? = try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                result.data
+                    ?.getParcelableExtra(CompanionDeviceManager.EXTRA_ASSOCIATION, AssociationInfo::class.java)
+                    ?.deviceMacAddress?.toString()
+            } else {
+                @Suppress("DEPRECATION")
+                result.data
+                    ?.getParcelableExtra<ScanResult>(CompanionDeviceManager.EXTRA_DEVICE)
+                    ?.device?.address
+            }
+        } catch (e: Throwable) {
+            AppLog.add(ctx, "登録結果の読み取りに失敗: $e")
+            null
         }
         if (found == null) {
             AppLog.add(ctx, "基板のアドレスを取得できませんでした")
@@ -117,8 +153,8 @@ private fun App() {
                 @Suppress("DEPRECATION")
                 cdm.startObservingDevicePresence(addr)
                 AppLog.add(ctx, "登録しました ($addr)。以後、基板が近くに来ると自動で時刻を送ります")
-            } catch (e: Exception) {
-                AppLog.add(ctx, "自動検出の設定に失敗: ${e.message}")
+            } catch (e: Throwable) {
+                AppLog.add(ctx, "自動検出の設定に失敗: $e")
             }
         }
     }
@@ -143,6 +179,7 @@ private fun App() {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("ESP32 時計合わせ", style = MaterialTheme.typography.headlineSmall)
+        Text(diagnose(ctx), style = MaterialTheme.typography.bodySmall)
         Text(
             if (address == null) "基板はまだ登録されていません。"
             else "登録済みの基板: $address",

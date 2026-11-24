@@ -7,17 +7,23 @@ Android スマホが、近くの ESP32 基板に、自動で今の時刻を送�
 
 ## 状態
 
-**まだ一度もビルド・実機確認をしていません。** 動かして、出た問題を直していく段階です。
+実機で動作確認済みです（Android 16 のタブレット HEADWOLF Titan 1 と、ESP-WROOM-32 の ideaspark 1.14インチLCD基板）。
+
+- 基板を登録すると、基板の電源を入れ直したとき、アプリを開かなくても、自動で時刻が合うことを確認しました。
+- 基板の画面は、ST7789 系の 240x135（SPI接続）で、横向き・位置の補正は `esp32/lcd.py` に入っています。
 
 ## 使い方
 
 ### 1. 基板に書き込む（Mac）
 
-`lcd.py` は、すでに基板に入っている前提です。
+`lcd.py`（画面の部品）と `main.py`（時計）の2つを、基板に書き込みます。
 
 ```bash
+python3 -m mpremote connect /dev/cu.usbserial-8340 cp Esp32TimeSync/esp32/lcd.py :lcd.py
 python3 -m mpremote connect /dev/cu.usbserial-8340 cp Esp32TimeSync/esp32/main.py :main.py
 ```
+
+（`/dev/cu.usbserial-8340` は、基板をつないだときの名前です。`ls /dev/cu.*` で確認できます）
 
 基板の EN ボタンを押すと、画面に「--:--:--」と赤い「NO SYNC」が出ます。これが「時刻を待っている」状態です。
 

@@ -1,0 +1,250 @@
+# HuskyLens 2 (DFRobot SEN0638) を ESP32 の MicroPython から I2C で使う小さな部品
+#
+# 通信の決まりは、DFRobot 公式の Arduino 用部品
+#   https://github.com/DFRobot/DFRobot_HuskylensV2 (ProtocolV2.cpp / Result.h)
+# を読んで、そのまま MicroPython に書き直したもの。
+# ※ 実機ではまだ動かしていない。公式の部品が対応するファームウェアは 1.4.2 以上。
+#
+# 使い方の例:
+#   from machine import I2C, Pin
+#   import huskylens2 as hl
+#   i2c = I2C(0, sda=Pin(21), scl=Pin(22), freq=100000)
+#   cam = hl.HuskyLens2(i2c)
+#   if cam.knock():
+#       cam.switch_algorithm(hl.ALGO_FACE_RECOGNITION)
+#       for r in cam.get_results(hl.ALGO_FACE_RECOGNITION):
+#           print(r)
+
+import struct
+
+try:
+    from time import ticks_ms, ticks_diff, sleep_ms
+except ImportError:  # パソコンの Python で試験するとき
+    import time
+
+    def ticks_ms():
+        return int(time.monotonic() * 1000)
+
+    def ticks_diff(a, b):
+        return a - b
+
+    def sleep_ms(ms):
+        time.sleep(ms / 1000)
+
+
+I2C_ADDR = 0x50  # 公式の部品の addr
+LCD_WIDTH = 640  # カメラ画面の大きさ（公式の部品の値）
+LCD_HEIGHT = 480
+
+# コマンド
+CMD_KNOCK = 0x00
+CMD_GET_RESULT = 0x01
+CMD_SET_ALGORITHM = 0x0A
+CMD_RETURN_ARGS = 0x1A
+CMD_RETURN_INFO = 0x1B
+CMD_RETURN_BLOCK = 0x1C
+CMD_RETURN_ARROW = 0x1D
+
+# 認識の種類（アルゴリズム）
+ALGO_ANY = 0
+ALGO_FACE_RECOGNITION = 1
+ALGO_OBJECT_RECOGNITION = 2
+ALGO_OBJECT_TRACKING = 3
+ALGO_COLOR_RECOGNITION = 4
+ALGO_OBJECT_CLASSIFICATION = 5
+ALGO_SELF_LEARNING_CLASSIFICATION = 6
+ALGO_SEGMENT = 7
+ALGO_HAND_RECOGNITION = 8
+ALGO_POSE_RECOGNITION = 9
+ALGO_LICENSE_RECOGNITION = 10
+ALGO_OCR_RECOGNITION = 11
+ALGO_LINE_TRACKING = 12
+ALGO_EMOTION_RECOGNITION = 13
+ALGO_GAZE_RECOGNITION = 14
+ALGO_FACE_ORIENTATION = 15
+ALGO_TAG_RECOGNITION = 16
+ALGO_BARCODE_RECOGNITION = 17
+ALGO_QRCODE_RECOGNITION = 18
+ALGO_FALLDOWN_RECOGNITION = 19
+
+_FRAME_SIZE = 512  # 受信できる1つの枠の最大サイズ（公式の部品の値）
+_MAX_RESULT = 10  # 一度に受け取る結果の最大数（公式の部品の値）
+_WRITE_CHUNK = 64  # I2C の1回で送る最大バイト数（公式の部品の値）
+_BOARD_LARGE_RAM = 1  # ESP32 は「大きいメモリの基板」として名乗る
+
+
+class HuskyLens2:
+    def __init__(self, i2c, addr=I2C_ADDR, timeout_ms=5000, retry=5):
+        self.i2c = i2c
+        self.addr = addr
+        self.timeout_ms = timeout_ms
+        self.retry = retry
+        self.max_id = 0
+        self._rx = bytearray(_FRAME_SIZE)
+        self._idx = 0
+        self._pending = bytearray()
+
+    # ---- 送る側 ----
+    @staticmethod
+    def build_packet(cmd, algo=0, data=b""):
+        """55 AA コマンド アルゴ 長さ データ… 合計(下位8ビット)"""
+        body = bytes([0x55, 0xAA, cmd, algo, len(data)]) + bytes(data)
+        return body + bytes([sum(body) & 0xFF])
+
+    def _write(self, packet):
+        n = len(packet)
+        full = n // _WRITE_CHUNK
+        remain = n % _WRITE_CHUNK
+        for i in range(full):
+            self.i2c.writeto(self.addr, packet[i * _WRITE_CHUNK:(i + 1) * _WRITE_CHUNK])
+            sleep_ms(5)
+        if remain:
+            self.i2c.writeto(self.addr, packet[full * _WRITE_CHUNK:])
+
+    # ---- 受ける側 ----
+    def _feed(self, b):
+        """1バイトずつ受け取り、1つの枠が完成して合計も合えば、その枠を返す。"""
+        i = self._idx
+        rx = self._rx
+        if i == 0:
+            if b != 0x55:
+                return None
+            rx[0] = b
+        elif i == 1:
+            if b != 0xAA:
+                self._idx = 0
+                return None
+            rx[1] = b
+        elif i == 4:
+            if b + 6 > _FRAME_SIZE:
+                self._idx = 0
+                return None
+            rx[4] = b
+        elif i < 4:
+            rx[i] = b
+        else:
+            rx[i] = b
+            if i == rx[4] + 5:  # 合計のバイトまで届いた
+                self._idx = 0
+                end = rx[4] + 5
+                if (sum(rx[:end]) & 0xFF) == rx[end]:
+                    return bytes(rx[:end + 1])
+                return None
+        self._idx = i + 1
+        return None
+
+    def _read_frame(self, deadline):
+        while ticks_diff(deadline, ticks_ms()) > 0:
+            if not self._pending:
+                try:
+                    self._pending = bytearray(self.i2c.readfrom(self.addr, 16))
+                except OSError:
+                    sleep_ms(2)
+                    continue
+            while self._pending:
+                frame = self._feed(self._pending.pop(0))
+                if frame is not None:
+                    return frame
+        return None
+
+    def _wait(self, command):
+        deadline = ticks_ms() + self.timeout_ms
+        while ticks_diff(deadline, ticks_ms()) > 0:
+            frame = self._read_frame(deadline)
+            if frame is None:
+                return None
+            if frame[2] == command:
+                return frame
+            # 違う種類の枠は読み飛ばす（公式の部品と同じ）
+        return None
+
+    # ---- 命令 ----
+    def knock(self):
+        """つながっているかの確認。成功すると True。"""
+        packet = self.build_packet(CMD_KNOCK, ALGO_ANY, bytes([_BOARD_LARGE_RAM]) + bytes(13))
+        for _ in range(self.retry):
+            self._write(packet)
+            sleep_ms(10)
+            frame = self._wait(CMD_RETURN_ARGS)
+            if frame is not None:
+                return _int8(frame[6]) == 0
+        return False
+
+    def switch_algorithm(self, algo):
+        """認識の種類を切り替える。成功すると True。"""
+        packet = self.build_packet(CMD_SET_ALGORITHM, ALGO_ANY, bytes([algo]) + bytes(13))
+        for _ in range(self.retry):
+            self._write(packet)
+            frame = self._wait(CMD_RETURN_ARGS)
+            if frame is not None:
+                return _int8(frame[6]) == 0
+        return False
+
+    def get_results(self, algo):
+        """認識の結果を、辞書の一覧で返す。失敗したら None。"""
+        packet = self.build_packet(CMD_GET_RESULT, algo, b"")
+        info = None
+        for _ in range(self.retry):
+            self._write(packet)
+            info = self._wait(CMD_RETURN_INFO)
+            if info is not None:
+                break
+        if info is None:
+            return None
+        data = info[5:-1]
+        self.max_id = data[0]
+        total_results, _learned, total_blocks, _blocks_learned = struct.unpack_from("<hhhh", data, 2)
+        total_results = min(total_results, _MAX_RESULT)
+        total_blocks = min(total_blocks, _MAX_RESULT)
+        results = []
+        for _ in range(total_blocks):
+            frame = self._wait(CMD_RETURN_BLOCK)
+            if frame is not None:
+                results.append(parse_result(frame))
+        for _ in range(total_blocks, total_results):
+            frame = self._wait(CMD_RETURN_ARROW)
+            if frame is not None:
+                results.append(parse_result(frame))
+        return results
+
+
+def _int8(v):
+    return v - 256 if v > 127 else v
+
+
+def parse_result(frame):
+    """1つの結果の枠 (BLOCK / ARROW) を辞書にする。"""
+    data = frame[5:-1]
+    r = {
+        "type": "block" if frame[2] == CMD_RETURN_BLOCK else "arrow",
+        "id": data[0],
+        "level": _int8(data[1]),
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0,
+        "conf": 0.0,
+        "name": "",
+        "content": "",
+    }
+    if len(data) >= 14:
+        r["x"], r["y"], r["w"], r["h"] = struct.unpack_from("<hhhh", data, 2)
+        r["conf"] = struct.unpack_from("<f", data, 10)[0]
+    header = 14
+    n = len(data)
+    if n > header:
+        name_len = data[header]
+        if header + 2 + name_len <= n:
+            r["name"] = _text(data[header + 1:header + 1 + name_len])
+            content_len = data[header + 1 + name_len]
+            if header + 2 + name_len + content_len <= n:
+                start = header + 2 + name_len
+                r["content"] = _text(data[start:start + content_len])
+    return r
+
+
+def _text(b):
+    try:
+        return bytes(b).decode("utf-8")
+    except Exception:
+        return ""

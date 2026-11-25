@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640" font-family="Noto Sans CJK JP, WenQuanYi Zen Hei, Hiragino Sans, Yu Gothic, sans-serif">
+<rect width="1000" height="640" fill="#ffffff"/>
+<text x="500" y="38" font-size="26" font-weight="bold" text-anchor="middle" fill="#111">配線図：ESP32 ⇄ 電源ボード ⇄ HuskyLens2</text>
+<text x="500" y="64" font-size="14" text-anchor="middle" fill="#555">I2C 接続（DFRobot フォーラムの回答と、公式 Wiki の配線図にもとづく。実機では未確認）</text>
+<rect x="30" y="90" width="230" height="330" rx="10" fill="#eef3ff" stroke="#355" stroke-width="2"/>
+<text x="145" y="122" font-size="18" font-weight="bold" text-anchor="middle" fill="#123">ESP32 基板</text>
+<text x="145" y="144" font-size="13" text-anchor="middle" fill="#345">(ideaspark 1.14インチ LCD)</text>
+<text x="145" y="166" font-size="12" text-anchor="middle" fill="#567">画面は別の穴を使用中（影響なし）</text>
+<circle cx="260" cy="190" r="7" fill="#1faa3c" stroke="#000"/>
+<text x="246" y="196" font-size="18" font-weight="bold" text-anchor="end" fill="#111">D21</text>
+<circle cx="260" cy="240" r="7" fill="#1e5fe0" stroke="#000"/>
+<text x="246" y="246" font-size="18" font-weight="bold" text-anchor="end" fill="#111">D22</text>
+<circle cx="260" cy="290" r="7" fill="#222222" stroke="#000"/>
+<text x="246" y="296" font-size="18" font-weight="bold" text-anchor="end" fill="#111">GND</text>
+<circle cx="260" cy="340" r="7" fill="#e02020" stroke="#000"/>
+<text x="246" y="346" font-size="18" font-weight="bold" text-anchor="end" fill="#111">3V3</text>
+<text x="145" y="385" font-size="12" text-anchor="middle" fill="#a00">※ 赤は上の列の「3V3」につなぐ。</text>
+<text x="145" y="403" font-size="12" text-anchor="middle" fill="#a00">下の列の「VIN」(5V) は使わない。</text>
+<rect x="380" y="90" width="250" height="330" rx="10" fill="#222" stroke="#000" stroke-width="2"/>
+<text x="505" y="122" font-size="18" font-weight="bold" text-anchor="middle" fill="#fff">HUSKYLENS 2</text>
+<text x="505" y="144" font-size="18" font-weight="bold" text-anchor="middle" fill="#fff">Power Board V1.0.0</text>
+<text x="395" y="172" font-size="13" fill="#9cf">Gravity 端子</text>
+<text x="615" y="172" font-size="13" text-anchor="end" fill="#9cf">I2C/UART 端子</text>
+<circle cx="380" cy="190" r="7" fill="#1faa3c" stroke="#fff"/>
+<text x="398" y="196" font-size="18" font-weight="bold" fill="#fff">D/T</text>
+<circle cx="630" cy="190" r="7" fill="#eee" stroke="#fff"/>
+<text x="612" y="196" font-size="18" font-weight="bold" text-anchor="end" fill="#fff">D/T</text>
+<circle cx="380" cy="240" r="7" fill="#1e5fe0" stroke="#fff"/>
+<text x="398" y="246" font-size="18" font-weight="bold" fill="#fff">C/R</text>
+<circle cx="630" cy="240" r="7" fill="#eee" stroke="#fff"/>
+<text x="612" y="246" font-size="18" font-weight="bold" text-anchor="end" fill="#fff">C/R</text>
+<circle cx="380" cy="290" r="7" fill="#222222" stroke="#fff"/>
+<text x="398" y="296" font-size="18" font-weight="bold" fill="#fff">−</text>
+<circle cx="630" cy="290" r="7" fill="#eee" stroke="#fff"/>
+<text x="612" y="296" font-size="18" font-weight="bold" text-anchor="end" fill="#fff">−</text>
+<circle cx="380" cy="340" r="7" fill="#e02020" stroke="#fff"/>
+<text x="398" y="346" font-size="18" font-weight="bold" fill="#fff">+</text>
+<circle cx="630" cy="340" r="7" fill="#eee" stroke="#fff"/>
+<text x="612" y="346" font-size="18" font-weight="bold" text-anchor="end" fill="#fff">+</text>
+<text x="505" y="195" font-size="12" text-anchor="middle" fill="#bbb">SDA(データ)</text>
+<text x="505" y="245" font-size="12" text-anchor="middle" fill="#bbb">SCL(クロック)</text>
+<text x="505" y="295" font-size="12" text-anchor="middle" fill="#bbb">GND</text>
+<text x="505" y="345" font-size="12" text-anchor="middle" fill="#bbb">電源(入力)</text>
+<rect x="445" y="375" width="120" height="34" rx="6" fill="#555" stroke="#fff"/>
+<text x="505" y="397" font-size="14" font-weight="bold" text-anchor="middle" fill="#fff">PWR IN (USB-C)</text>
+<rect x="760" y="140" width="210" height="260" rx="10" fill="#f0f0f0" stroke="#444" stroke-width="2"/>
+<text x="865" y="172" font-size="18" font-weight="bold" text-anchor="middle" fill="#111">HuskyLens 2</text>
+<text x="865" y="193" font-size="13" text-anchor="middle" fill="#444">(SEN0638)</text>
+<circle cx="760" cy="190" r="7" fill="#fff" stroke="#444"/>
+<circle cx="760" cy="240" r="7" fill="#fff" stroke="#444"/>
+<circle cx="760" cy="290" r="7" fill="#fff" stroke="#444"/>
+<circle cx="760" cy="340" r="7" fill="#fff" stroke="#444"/>
+<text x="865" y="385" font-size="12" text-anchor="middle" fill="#444">本体の I2C/UART 端子（左側）</text>
+<text x="320" y="150" font-size="13" text-anchor="middle" fill="#555">色付きケーブル</text>
+<line x1="260" y1="190" x2="380" y2="190" stroke="#1faa3c" stroke-width="7" stroke-linecap="round"/>
+<text x="320" y="180" font-size="12" text-anchor="middle" fill="#1faa3c">緑</text>
+<line x1="260" y1="240" x2="380" y2="240" stroke="#1e5fe0" stroke-width="7" stroke-linecap="round"/>
+<text x="320" y="230" font-size="12" text-anchor="middle" fill="#1e5fe0">青</text>
+<line x1="260" y1="290" x2="380" y2="290" stroke="#222222" stroke-width="7" stroke-linecap="round"/>
+<text x="320" y="280" font-size="12" text-anchor="middle" fill="#222222">黒</text>
+<line x1="260" y1="340" x2="380" y2="340" stroke="#e02020" stroke-width="7" stroke-linecap="round"/>
+<text x="320" y="330" font-size="12" text-anchor="middle" fill="#e02020">赤</text>
+<text x="695" y="150" font-size="13" text-anchor="middle" fill="#555">白い4ピンケーブル</text>
+<line x1="630" y1="190" x2="760" y2="190" stroke="#999" stroke-width="9" stroke-linecap="round"/>
+<line x1="630" y1="190" x2="760" y2="190" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+<line x1="630" y1="240" x2="760" y2="240" stroke="#999" stroke-width="9" stroke-linecap="round"/>
+<line x1="630" y1="240" x2="760" y2="240" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+<line x1="630" y1="290" x2="760" y2="290" stroke="#999" stroke-width="9" stroke-linecap="round"/>
+<line x1="630" y1="290" x2="760" y2="290" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+<line x1="630" y1="340" x2="760" y2="340" stroke="#999" stroke-width="9" stroke-linecap="round"/>
+<line x1="630" y1="340" x2="760" y2="340" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+<rect x="40" y="500" width="190" height="60" rx="8" fill="#fff" stroke="#355" stroke-width="2"/>
+<text x="135" y="526" font-size="14" font-weight="bold" text-anchor="middle" fill="#123">Mac の USB</text>
+<text x="135" y="546" font-size="12" text-anchor="middle" fill="#345">ESP32 のプログラム用・電源</text>
+<line x1="145" y1="420" x2="145" y2="500" stroke="#355" stroke-width="5"/>
+<rect x="405" y="500" width="200" height="60" rx="8" fill="#fff" stroke="#a60" stroke-width="2"/>
+<text x="505" y="526" font-size="14" font-weight="bold" text-anchor="middle" fill="#630">USB 電源（充電器など）</text>
+<text x="505" y="546" font-size="12" text-anchor="middle" fill="#840">HuskyLens2 に電気を送る</text>
+<line x1="505" y1="409" x2="505" y2="500" stroke="#a60" stroke-width="5"/>
+<rect x="660" y="440" width="320" height="180" rx="8" fill="#fff8e6" stroke="#c90" stroke-width="2"/>
+<text x="676" y="468" font-size="15" font-weight="bold" fill="#630">電源を入れる順番</text>
+<text x="676" y="494" font-size="13" fill="#333">① 配線を全部つなぐ（USB は両方抜いたまま）</text>
+<text x="676" y="518" font-size="13" fill="#333">② 赤い線が「3V3」か、もう一度確認する</text>
+<text x="676" y="542" font-size="13" fill="#333">③ 先に PWR IN の USB 電源をつなぎ、</text>
+<text x="692" y="562" font-size="13" fill="#333">HuskyLens2 が起動するまで待つ</text>
+<text x="676" y="586" font-size="13" fill="#333">④ そのあと ESP32 の USB をつなぐ</text>
+</svg>

@@ -240,6 +240,40 @@ def test_every_row_has_fixed_width():
         assert len(ws) == 1, "y=%d の行の文字数がばらばら: %r" % (y, ws)
 
 
+def test_unexpected_error_does_not_stop():
+    """HuskyLens2 の返事が想定外で IndexError などが起きても、止まらずに、エラーを表示する。"""
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus)
+    s.update(0)
+    assert s.state == hl_status.FOUND
+
+    def boom():
+        raise IndexError("short frame")
+
+    s.cam.knock = boom
+    s.update(0)  # ここで例外が外に出ないこと
+    assert s.state == hl_status.NOT_FOUND
+    assert s.err == "knock:IndexError", s.err
+    detail, color, extra = s.view()
+    assert detail == "not found" and extra == "knock:IndexError", (detail, extra)
+    # 直ったら、再接続でき、エラー表示は消える
+    s.cam.knock = lambda: True
+    s.cam.switch_algorithm = lambda a: True
+    s.update(3000)
+    assert s.state == hl_status.FOUND
+    s.update(3000)
+    assert s.state == hl_status.READY and s.err == ""
+
+
+def test_knock_returning_false_shows_reason():
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus)
+    s.update(0)
+    s.cam.knock = lambda: False
+    s.update(0)
+    assert s.state == hl_status.NOT_FOUND and s.err == "knock failed", s.err
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

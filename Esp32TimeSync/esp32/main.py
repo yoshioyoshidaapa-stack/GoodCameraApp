@@ -1,8 +1,25 @@
-# ESP32 側: BLE で時刻を受け取って、画面に時計を出す
+# ESP32 側: BLE で時刻を受け取って、画面に時計と HuskyLens2 の状態を出す
+#
+# 画面 (240x135):
+#   y=4   時刻 HH:MM:SS (大)
+#   y=34  日付と曜日 / 時刻が未同期のときは赤い NO SYNC
+#   y=58  区切り線
+#   y=64  HuskyLens2 の見出し
+#   y=76  HuskyLens2 の状態 (not found / connecting / faces:N)
+#   y=96  HuskyLens2 の詳細 (顔の位置など)
+#   y=118 Bluetooth の状態
+#
+# 基板に入れるファイル: lcd.py, hl_status.py, huskylens2.py (なくても時計は動く), main.py
+
 import bluetooth
 import machine
 import time
 import lcd
+
+try:
+    import hl_status
+except ImportError:
+    hl_status = None
 
 _IRQ_CENTRAL_CONNECT = 1
 _IRQ_CENTRAL_DISCONNECT = 2
@@ -21,6 +38,7 @@ _SERVICE = (
 )
 
 WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+LINE_COLOR = 0x4208  # 暗い灰色
 
 
 def uuid128_le(s):
@@ -67,42 +85,71 @@ class Clock:
             machine.RTC().datetime((y, mo, d, 0, h, mi, sec, 0))
             self.synced = True
             self.last_error = ""
-        except Exception as e:
+        except Exception:
             self.last_error = "bad data"
+
+
+def pad(s, n):
+    """画面の古い文字が残らないよう、決まった長さまで空白で埋める。"""
+    return (s + " " * n)[:n]
+
+
+def make_husky():
+    """HuskyLens2 の状態表示を用意する。部品がなくても、時計は止めない。"""
+    if hl_status is None:
+        return None
+    try:
+        i2c = machine.I2C(0, sda=machine.Pin(21), scl=machine.Pin(22), freq=100000)
+    except Exception:
+        i2c = None
+    return hl_status.HuskyStatus(i2c)
 
 
 def main():
     lcd.init()
     lcd.clear()
+    lcd.rect(8, 58, 224, 1, LINE_COLOR)
     clock = Clock()
-    last_sec = -1
-    last_state = None
+    husky = make_husky()
+    colors = {"red": lcd.RED, "yellow": lcd.YELLOW, "green": lcd.GREEN}
+    cache = {}
+
+    def row(key, s, x, y, col, scale):
+        v = (s, col)
+        if cache.get(key) != v:
+            cache[key] = v
+            lcd.text(s, x, y, col, scale)
+
     while True:
+        if husky is not None:
+            husky.update(time.ticks_ms())
         t = time.localtime()
-        state = (clock.synced, clock.conn is not None, clock.last_error)
-        if t[5] != last_sec or state != last_state:
-            last_sec = t[5]
-            last_state = state
-            if clock.synced:
-                hhmmss = "%02d:%02d:%02d" % (t[3], t[4], t[5])
-                date = "%04d-%02d-%02d" % (t[0], t[1], t[2])
-                week = WEEK[t[6]]
-                col = lcd.CYAN
-            else:
-                hhmmss = "--:--:--"
-                date = "----------"
-                week = "NO SYNC"
-                col = lcd.RED
-            lcd.text(hhmmss, 24, 16, col, 3)
-            lcd.text(date, 40, 56, lcd.WHITE, 2)
-            lcd.text(week + "     ", 40, 80, lcd.YELLOW, 2)
-            if clock.conn is not None:
-                status = "BLE: connected   "
-            elif clock.last_error:
-                status = "ERR: " + clock.last_error + "      "
-            else:
-                status = "BLE: waiting...  "
-            lcd.text(status, 8, 116, lcd.GREEN, 1)
+        if clock.synced:
+            hhmmss = "%02d:%02d:%02d" % (t[3], t[4], t[5])
+            date = "%04d-%02d-%02d %s" % (t[0], t[1], t[2], WEEK[t[6]])
+            time_col, date_col = lcd.CYAN, lcd.WHITE
+        else:
+            hhmmss = "--:--:--"
+            date = "NO SYNC"
+            time_col, date_col = lcd.RED, lcd.RED
+        row("time", hhmmss, 24, 4, time_col, 3)
+        row("date", pad(date, 15), 0, 34, date_col, 2)
+
+        row("hl_title", pad("HUSKYLENS 2  I2C 0x50", 30), 0, 64, lcd.CYAN, 1)
+        if husky is not None:
+            detail, color, extra = husky.view()
+        else:
+            detail, color, extra = "no driver", "red", "hl_status.py missing"
+        row("hl_detail", pad(detail, 15), 0, 76, colors[color], 2)
+        row("hl_extra", pad(extra, 30), 0, 96, lcd.WHITE, 1)
+
+        if clock.conn is not None:
+            ble = "BLE: connected"
+        elif clock.last_error:
+            ble = "ERR: " + clock.last_error
+        else:
+            ble = "BLE: waiting..."
+        row("ble", pad(ble, 30), 0, 118, lcd.GREEN, 1)
         time.sleep_ms(100)
 
 

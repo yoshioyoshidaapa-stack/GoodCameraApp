@@ -16,16 +16,21 @@ Android スマホが、近くの ESP32 基板に、自動で今の時刻を送�
 
 ### 1. 基板に書き込む（Mac）
 
-`lcd.py`（画面の部品）と `main.py`（時計）の2つを、基板に書き込みます。
+基板に入れるファイルは、4つです。`huskylens2.py` と `hl_status.py` は、HuskyLens2 を画面に出すための部品で、なくても時計は動きます（その場合、画面には「no driver」と出ます）。
 
 ```bash
 python3 -m mpremote connect /dev/cu.usbserial-8340 cp Esp32TimeSync/esp32/lcd.py :lcd.py
+python3 -m mpremote connect /dev/cu.usbserial-8340 cp HuskyLens2/huskylens2.py :huskylens2.py
+python3 -m mpremote connect /dev/cu.usbserial-8340 cp Esp32TimeSync/esp32/hl_status.py :hl_status.py
 python3 -m mpremote connect /dev/cu.usbserial-8340 cp Esp32TimeSync/esp32/main.py :main.py
 ```
 
 （`/dev/cu.usbserial-8340` は、基板をつないだときの名前です。`ls /dev/cu.*` で確認できます）
 
-基板の EN ボタンを押すと、画面に「--:--:--」と赤い「NO SYNC」が出ます。これが「時刻を待っている」状態です。
+基板の EN ボタンを押すと、画面の上に、赤い「--:--:--」と「NO SYNC」が出ます。これが「時刻を待っている」状態です。
+その下に、HuskyLens2 の状態（見つからなければ「not found」）が出ます。HuskyLens2 をつながなくても、時計は動きます。
+
+画面の割り当ては、`esp32/main.py` の先頭に書いてあります。
 
 ### 2. アプリを入れる（Android Studio）
 

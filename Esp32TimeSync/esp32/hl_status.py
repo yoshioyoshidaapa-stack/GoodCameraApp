@@ -22,9 +22,26 @@ NO_DRIVER = 3
 
 ADDR = 0x50
 
+# 人(ID)ごとの色。ID 0 は「まだ覚えていない人」。ID が多いときは、最初に戻って繰り返す。
+ID_COLORS = ("white", "red", "green", "blue", "yellow", "magenta", "cyan", "orange")
+
+
+def id_color(person_id):
+    return ID_COLORS[person_id % len(ID_COLORS)]
+
+
+def main_result(results):
+    """複数の顔のうち、いちばん大きい顔(=いちばん近い人)を選ぶ。"""
+    best = None
+    for r in results:
+        if best is None or r["w"] * r["h"] > best["w"] * best["h"]:
+            best = r
+    return best
+
 
 class HuskyStatus:
-    def __init__(self, i2c, algo=None, scan_ms=3000, retry_ms=3000, poll_ms=1000):
+    def __init__(self, i2c, algo=None, scan_ms=3000, retry_ms=3000, poll_ms=1000,
+                 auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1):
         self.i2c = i2c
         self.state = NO_DRIVER if (hl is None or i2c is None) else NOT_FOUND
         self.algo = algo if algo is not None else (hl.ALGO_FACE_RECOGNITION if hl else 0)
@@ -33,6 +50,15 @@ class HuskyStatus:
         self.poll_ms = poll_ms
         self.faces = 0
         self.first = None  # 最初の結果 (辞書)
+        # 顔が見えたら写真を撮る(撮りすぎないよう、間隔と上限を決めてある)
+        self.auto_photo = auto_photo
+        self.photo_cooldown_ms = photo_cooldown_ms
+        self.photo_max = photo_max
+        self.photo_res = photo_res  # 1 = 640x480
+        self.photos = 0  # 電源を入れてから撮った枚数
+        self.last_photo = ""  # 直近のファイル名
+        self.photo_fail = False
+        self._last_photo_ms = None
         self.err = ""  # 直近のエラー（画面に出す）
         self.step = ""  # いま何をしているか（エラーの場所の手がかり）
         self._next = 0
@@ -97,7 +123,32 @@ class HuskyStatus:
                 self.first = None
             else:
                 self.faces = len(rs)
-                self.first = rs[0] if rs else None
+                self.first = main_result(rs)
+                if self.faces > 0:
+                    self._maybe_take_photo(now)
+
+    def toggle_photo(self):
+        """写真を撮る機能の、入り切り。"""
+        self.auto_photo = not self.auto_photo
+        return self.auto_photo
+
+    def _maybe_take_photo(self, now):
+        if not self.auto_photo or self.photos >= self.photo_max:
+            return
+        if self._last_photo_ms is not None and ticks_diff(now, self._last_photo_ms) < self.photo_cooldown_ms:
+            return
+        self._last_photo_ms = now  # 失敗しても、すぐには撮り直さない
+        self.step = "photo"
+        try:
+            name = self.cam.take_photo(self.photo_res, timeout_ms=2500)
+        except OSError:
+            name = ""
+        if name:
+            self.photos += 1
+            self.last_photo = name
+            self.photo_fail = False
+        else:
+            self.photo_fail = True
 
     def view(self):
         """画面に出す内容を (状態の文字 [15字まで], 色の名前, 詳細の文字 [30字まで]) で返す。"""
@@ -112,4 +163,24 @@ class HuskyStatus:
         if self.first is None:
             return ("faces:0", "green", "no face")
         r = self.first
-        return ("faces:%d" % self.faces, "green", "x%d y%d %dx%d" % (r["x"], r["y"], r["w"], r["h"]))
+        color = id_color(r["id"])
+        name = r["name"][:8]
+        if name:
+            extra = "ID%d %s x%d y%d" % (r["id"], name, r["x"], r["y"])
+        else:
+            extra = "ID%d x%d y%d %dx%d" % (r["id"], r["x"], r["y"], r["w"], r["h"])
+        return ("faces:%d" % self.faces, color, extra)
+
+    def person_color(self):
+        """画面の色の帯に使う色の名前。顔がなければ "gray"。"""
+        if self.state != READY or self.first is None:
+            return "gray"
+        return id_color(self.first["id"])
+
+    def photo_line(self):
+        """写真の状態を、画面に出す1行(30字まで)で返す。"""
+        if self.state == NO_DRIVER:
+            return "PHOTO -"
+        mode = "ON" if self.auto_photo else "OFF"
+        tail = "FAIL" if self.photo_fail else self.last_photo[-12:]
+        return ("PHOTO %s %d %s" % (mode, self.photos, tail))[:30]

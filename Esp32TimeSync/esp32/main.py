@@ -3,11 +3,14 @@
 # 画面 (240x135):
 #   y=4   時刻 HH:MM:SS (大)
 #   y=34  日付と曜日 / 時刻が未同期のときは赤い NO SYNC
-#   y=58  区切り線
+#   y=56  色の帯 (顔の人(ID)ごとに色が変わる。顔がなければ灰色)
 #   y=64  HuskyLens2 の見出し
-#   y=76  HuskyLens2 の状態 (not found / connecting / faces:N)
-#   y=96  HuskyLens2 の詳細 (顔の位置など)
+#   y=76  HuskyLens2 の状態 (not found / connecting / faces:N。文字も人ごとの色)
+#   y=96  人の詳細 (ID・名前・位置)
+#   y=107 写真の状態 (PHOTO ON/OFF  撮った枚数  直近のファイル名)
 #   y=118 Bluetooth の状態
+#
+# BOOT ボタン(基板の「BOOT」)を押すと、顔が見えたら写真を撮る機能が、入り切りできる。
 #
 # 基板に入れるファイル: lcd.py, hl_status.py, huskylens2.py (なくても時計は動く), main.py
 
@@ -38,7 +41,9 @@ _SERVICE = (
 )
 
 WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-LINE_COLOR = 0x4208  # 暗い灰色
+GRAY = 0x4208  # 暗い灰色
+MAGENTA = 0xF81F
+ORANGE = 0xFD20
 
 
 def uuid128_le(s):
@@ -108,11 +113,16 @@ def make_husky():
 def main():
     lcd.init()
     lcd.clear()
-    lcd.rect(8, 58, 224, 1, LINE_COLOR)
+    lcd.rect(8, 56, 224, 3, GRAY)
     clock = Clock()
     husky = make_husky()
-    colors = {"red": lcd.RED, "yellow": lcd.YELLOW, "green": lcd.GREEN}
+    colors = {
+        "red": lcd.RED, "yellow": lcd.YELLOW, "green": lcd.GREEN, "blue": lcd.BLUE,
+        "white": lcd.WHITE, "cyan": lcd.CYAN, "magenta": MAGENTA, "orange": ORANGE, "gray": GRAY,
+    }
     cache = {}
+    boot = machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP)  # BOOT ボタン
+    boot_down = False
 
     def row(key, s, x, y, col, scale):
         v = (s, col)
@@ -123,6 +133,13 @@ def main():
     while True:
         if husky is not None:
             husky.update(time.ticks_ms())
+            # BOOT ボタンで、写真を撮る機能を入り切りする(押した瞬間に1回だけ)
+            if boot.value() == 0:
+                if not boot_down:
+                    boot_down = True
+                    husky.toggle_photo()
+            else:
+                boot_down = False
         t = time.localtime()
         if clock.synced:
             hhmmss = "%02d:%02d:%02d" % (t[3], t[4], t[5])
@@ -138,10 +155,19 @@ def main():
         row("hl_title", pad("HUSKYLENS 2  I2C 0x50", 30), 0, 64, lcd.CYAN, 1)
         if husky is not None:
             detail, color, extra = husky.view()
+            bar = husky.person_color()
+            photo = husky.photo_line()
         else:
             detail, color, extra = "no driver", "red", "hl_status.py missing"
+            bar = "gray"
+            photo = "PHOTO -"
+        key = ("bar", bar)
+        if cache.get("bar") != key:
+            cache["bar"] = key
+            lcd.rect(8, 56, 224, 3, colors[bar])
         row("hl_detail", pad(detail, 15), 0, 76, colors[color], 2)
         row("hl_extra", pad(extra, 30), 0, 96, lcd.WHITE, 1)
+        row("photo", pad(photo, 30), 0, 107, lcd.YELLOW, 1)
 
         if clock.conn is not None:
             ble = "BLE: connected"

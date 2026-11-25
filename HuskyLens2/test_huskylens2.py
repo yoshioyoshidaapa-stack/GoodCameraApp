@@ -26,6 +26,9 @@ class FakeI2C:
         self.out = bytearray()
         self.chunks = []
         self.drop = drop_first_n  # 最初の何回かの命令を無視する（再送の試験用）
+        self.faces_present = True  # False なら、結果が 0 件
+        self.photo_fail = False  # True なら、写真は失敗の返事
+        self.photo_requests = 0  # 写真を頼まれた回数
 
     def writeto(self, addr, buf):
         assert addr == 0x50
@@ -57,6 +60,17 @@ class FakeI2C:
             assert size == 14
             self.algo = data[0]
             self.out += frame(hl.CMD_RETURN_ARGS, 0, bytes([self.algo, 0]) + bytes(12))
+        elif cmd == hl.CMD_ACTION_TAKE_PHOTO:
+            assert size == 14 and data[0] in (0, 1, 2, 3), (size, data[0])
+            self.photo_requests += 1
+            if self.photo_fail:
+                self.out += frame(hl.CMD_RETURN_ARGS, 0, bytes([0, 1]) + bytes(12))
+            else:
+                name = ("IMG_%04d.jpg" % self.photo_requests).encode()
+                self.out += frame(hl.CMD_RETURN_ARGS, 0, bytes([0, 0]) + bytes(12) + bytes([len(name)]) + name)
+        elif cmd == hl.CMD_GET_RESULT and not self.faces_present:
+            info = struct.pack("<BbhhhhI", 0, 0, 0, 0, 0, 0, 0)[:14]
+            self.out += frame(hl.CMD_RETURN_INFO, algo, info)
         elif cmd == hl.CMD_GET_RESULT:
             assert size == 0
             # 先に、関係ない種類の枠を1つ混ぜる（読み飛ばされるはず）

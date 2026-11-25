@@ -40,6 +40,7 @@ LCD_HEIGHT = 480
 CMD_KNOCK = 0x00
 CMD_GET_RESULT = 0x01
 CMD_SET_ALGORITHM = 0x0A
+CMD_ACTION_TAKE_PHOTO = 0x20
 CMD_RETURN_ARGS = 0x1A
 CMD_RETURN_INFO = 0x1B
 CMD_RETURN_BLOCK = 0x1C
@@ -66,6 +67,12 @@ ALGO_TAG_RECOGNITION = 16
 ALGO_BARCODE_RECOGNITION = 17
 ALGO_QRCODE_RECOGNITION = 18
 ALGO_FALLDOWN_RECOGNITION = 19
+
+# 写真の解像度
+RESOLUTION_DEFAULT = 0
+RESOLUTION_640x480 = 1
+RESOLUTION_1280x720 = 2
+RESOLUTION_1920x1080 = 3
 
 _FRAME_SIZE = 512  # 受信できる1つの枠の最大サイズ（公式の部品の値）
 _MAX_RESULT = 10  # 一度に受け取る結果の最大数（公式の部品の値）
@@ -185,6 +192,27 @@ class HuskyLens2:
                 return _int8(frame[6]) == 0
         return False
 
+    def take_photo(self, resolution=RESOLUTION_1280x720, timeout_ms=None):
+        """写真を撮らせる。HuskyLens2 が保存したファイル名を返す。失敗したら空の文字列 ""。
+        ※ 保存先は、公式 Wiki によると HuskyLens2 内蔵の USB ドライブの storage/photo。
+        ※ 本物の HuskyLens2 では、まだ試していない。"""
+        packet = self.build_packet(CMD_ACTION_TAKE_PHOTO, ALGO_ANY, bytes([resolution]) + bytes(13))
+        old = self.timeout_ms
+        if timeout_ms is not None:
+            self.timeout_ms = timeout_ms
+        try:
+            for _ in range(self.retry):
+                self._write(packet)
+                frame = self._wait(CMD_RETURN_ARGS)
+                if frame is not None:
+                    data = frame[5:-1]
+                    if len(data) < 2 or _int8(data[1]) != 0:
+                        return ""
+                    return _read_string(data, 14)
+        finally:
+            self.timeout_ms = old
+        return ""
+
     def get_results(self, algo):
         """認識の結果を、辞書の一覧で返す。失敗したら None。"""
         packet = self.build_packet(CMD_GET_RESULT, algo, b"")
@@ -246,6 +274,16 @@ def parse_result(frame):
                 start = header + 2 + name_len
                 r["content"] = _text(data[start:start + content_len])
     return r
+
+
+def _read_string(data, off):
+    """data の off 番目から「長さ 1バイト + 文字」の文字列を読む。足りなければ空。"""
+    if len(data) <= off:
+        return ""
+    n = data[off]
+    if off + 1 + n > len(data):
+        return ""
+    return _text(data[off + 1:off + 1 + n])
 
 
 def _text(b):

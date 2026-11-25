@@ -54,7 +54,8 @@ def test_state_flow_ready():
     s.update(0)
     assert s.faces == 3 and s.first["x"] == 320, (s.faces, s.first)
     detail, color, extra = s.view()
-    assert detail == "faces:3" and color == "green" and extra == "x320 y240 100x80", (detail, extra)
+    assert detail == "faces:3" and color == "red", (detail, color)  # ID 1 は赤
+    assert extra == "ID1 Taro x320 y240", extra
 
 
 def test_not_found_and_rescan():
@@ -91,7 +92,7 @@ def test_no_driver():
 
 # ---------- 画面の作り ----------
 class FakeLcd(types.ModuleType):
-    RED, YELLOW, GREEN, CYAN, WHITE, BLACK = 0xF800, 0xFFE0, 0x07E0, 0x07FF, 0xFFFF, 0
+    RED, YELLOW, GREEN, CYAN, WHITE, BLACK, BLUE = 0xF800, 0xFFE0, 0x07E0, 0x07FF, 0xFFFF, 0, 0x001F
 
     def __init__(self):
         types.ModuleType.__init__(self, "lcd")
@@ -146,7 +147,17 @@ def run_main(bus, loops, with_hl_status=True, synced=False):
 
     mach = types.ModuleType("machine")
     mach.RTC = FakeRTC
-    mach.Pin = lambda n, *a, **k: n
+    class FakePin:
+        IN = 0
+        PULL_UP = 2
+
+        def __init__(self, n, *a, **k):
+            self.n = n
+
+        def value(self):
+            return 1  # BOOT ボタンは押されていない
+
+    mach.Pin = FakePin
     mach.I2C = lambda *a, **k: bus
 
     saved_mods = {k: sys.modules.get(k) for k in ("bluetooth", "machine", "lcd", "hl_status")}
@@ -220,7 +231,8 @@ def test_layout_husky_ready():
     fake = run_main(FakeBus(present=True), loops=60)
     check_layout(fake)
     assert last_text(fake, 76) == "faces:3", last_text(fake, 76)
-    assert last_text(fake, 96) == "x320 y240 100x80", last_text(fake, 96)
+    assert last_text(fake, 96) == "ID1 Taro x320 y240", last_text(fake, 96)
+    assert last_text(fake, 107) == "PHOTO ON 1 IMG_0001.jpg", last_text(fake, 107)
 
 
 def test_clock_runs_without_hl_status():
@@ -272,6 +284,87 @@ def test_knock_returning_false_shows_reason():
     s.cam.knock = lambda: False
     s.update(0)
     assert s.state == hl_status.NOT_FOUND and s.err == "knock failed", s.err
+
+# ---------- 人ごとの色 ----------
+def test_id_colors():
+    assert [hl_status.id_color(i) for i in range(9)] == [
+        "white", "red", "green", "blue", "yellow", "magenta", "cyan", "orange", "white"]
+
+
+def test_main_person_is_the_biggest_face():
+    rs = [{"id": 2, "w": 20, "h": 30}, {"id": 5, "w": 100, "h": 80}, {"id": 1, "w": 50, "h": 50}]
+    assert hl_status.main_result(rs)["id"] == 5
+    assert hl_status.main_result([]) is None
+
+
+def test_person_color_bar():
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus, auto_photo=False)
+    assert s.person_color() == "gray"  # つながる前
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.state == hl_status.READY
+    assert s.person_color() == "red"  # いちばん大きい顔は ID 1
+    bus.faces_present = False
+    s.update(1000)
+    assert s.faces == 0 and s.person_color() == "gray"
+
+
+# ---------- 写真 ----------
+def test_take_photo_returns_file_name():
+    bus = FakeBus(present=True)
+    cam = hl.HuskyLens2(bus, timeout_ms=500)
+    assert cam.take_photo(hl.RESOLUTION_640x480) == "IMG_0001.jpg"
+    assert cam.take_photo() == "IMG_0002.jpg"
+    bus.photo_fail = True
+    assert cam.take_photo() == ""
+
+
+def test_auto_photo_cooldown_and_cap():
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus, poll_ms=1000, photo_cooldown_ms=10000, photo_max=2)
+    for t in (0, 0, 0):
+        s.update(t)  # つながって、最初の結果で、1枚目
+    assert bus.photo_requests == 1 and s.photos == 1 and s.last_photo == "IMG_0001.jpg"
+    s.update(1000)
+    s.update(5000)
+    assert bus.photo_requests == 1, "間隔(10秒)が、たっていないので、撮らない"
+    s.update(10000)
+    assert bus.photo_requests == 2 and s.photos == 2
+    s.update(20000)
+    assert bus.photo_requests == 2, "上限(2枚)に達したので、撮らない"
+    assert s.photo_line() == "PHOTO ON 2 IMG_0002.jpg"
+
+
+def test_no_photo_without_face_or_when_off():
+    bus = FakeBus(present=True)
+    bus.faces_present = False
+    s = hl_status.HuskyStatus(bus, poll_ms=1000, photo_cooldown_ms=0)
+    for t in (0, 0, 0, 1000, 2000):
+        s.update(t)
+    assert bus.photo_requests == 0, "顔がいないときは撮らない"
+    bus.faces_present = True
+    assert s.toggle_photo() is False
+    s.update(3000)
+    assert bus.photo_requests == 0, "OFF のときは撮らない"
+    assert s.photo_line().startswith("PHOTO OFF")
+    assert s.toggle_photo() is True
+    s.update(4000)
+    assert bus.photo_requests == 1
+
+
+def test_photo_failure_keeps_connection():
+    bus = FakeBus(present=True)
+    bus.photo_fail = True
+    s = hl_status.HuskyStatus(bus, poll_ms=1000, photo_cooldown_ms=10000)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.state == hl_status.READY, "写真に失敗しても、接続は保つ"
+    assert s.photo_fail is True and s.photos == 0
+    assert s.photo_line() == "PHOTO ON 0 FAIL"
+    # 失敗しても、すぐには撮り直さない
+    s.update(1000)
+    assert bus.photo_requests == 1
 
 
 def test_no_micropython_incompatible_calls():

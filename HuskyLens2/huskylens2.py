@@ -82,7 +82,8 @@ class HuskyLens2:
         self.max_id = 0
         self._rx = bytearray(_FRAME_SIZE)
         self._idx = 0
-        self._pending = bytearray()
+        self._pending = b""  # 読み取り済みで、まだ解析していない分
+        self._pos = 0  # _pending の、どこまで解析したか
 
     # ---- 送る側 ----
     @staticmethod
@@ -134,15 +135,19 @@ class HuskyLens2:
         return None
 
     def _read_frame(self, deadline):
+        # ※ MicroPython の bytearray には pop() がないので、位置(_pos)を進める方式にしている
         while ticks_diff(deadline, ticks_ms()) > 0:
-            if not self._pending:
+            if self._pos >= len(self._pending):
                 try:
-                    self._pending = bytearray(self.i2c.readfrom(self.addr, 16))
+                    self._pending = bytes(self.i2c.readfrom(self.addr, 16))
+                    self._pos = 0
                 except OSError:
                     sleep_ms(2)
                     continue
-            while self._pending:
-                frame = self._feed(self._pending.pop(0))
+            while self._pos < len(self._pending):
+                b = self._pending[self._pos]
+                self._pos += 1
+                frame = self._feed(b)
                 if frame is not None:
                     return frame
         return None

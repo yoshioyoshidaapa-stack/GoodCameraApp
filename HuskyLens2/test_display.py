@@ -274,6 +274,34 @@ def test_knock_returning_false_shows_reason():
     assert s.state == hl_status.NOT_FOUND and s.err == "knock failed", s.err
 
 
+def test_no_micropython_incompatible_calls():
+    """パソコンの Python にはあるが、MicroPython には無い書き方を、基板に入れるファイルで使っていないか。"""
+    import re
+    files = [
+        os.path.join(HERE, "huskylens2.py"),
+        os.path.join(ESP32, "hl_status.py"),
+        os.path.join(ESP32, "main.py"),
+        os.path.join(ESP32, "lcd.py"),
+    ]
+    bad = [
+        (r"\.pop\(", "bytearray/str には pop() が無い (list なら可)"),
+        (r"\.hex\(", "bytes.hex() は古い MicroPython に無い"),
+        (r"\.format\(", ".format() は使わず % を使う"),
+        (r"(?<![\w<>=!@%&])f[\"\']", "f文字列は使わない"),
+        (r"\.removeprefix\(|\.removesuffix\(", "MicroPython に無い"),
+        (r"\bfrom typing\b|\bimport typing\b", "typing は無い"),
+        (r"\bwalrus\b|:=", "代入式は使わない"),
+    ]
+    problems = []
+    for f in files:
+        for n, line in enumerate(open(f, encoding="utf-8").read().split("\n"), 1):
+            code = line.split("#")[0]
+            for pat, why in bad:
+                if re.search(pat, code):
+                    problems.append("%s:%d %s -> %s" % (os.path.basename(f), n, line.strip(), why))
+    assert not problems, "\n".join(problems)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

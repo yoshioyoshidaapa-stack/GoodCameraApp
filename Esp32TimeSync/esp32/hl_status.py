@@ -19,6 +19,7 @@ NOT_FOUND = 0
 FOUND = 1
 READY = 2
 NO_DRIVER = 3
+KNOCKED = 4  # つながった。HuskyLens2 が落ち着くまで待ってから、顔認識に切り替える
 
 ADDR = 0x50
 
@@ -77,7 +78,7 @@ def main_result(results):
 
 class HuskyStatus:
     def __init__(self, i2c, algo=None, scan_ms=3000, retry_ms=3000, poll_ms=1000,
-                 settle_ms=2000, max_miss=5,
+                 settle_ms=2000, max_miss=5, knock_settle_ms=4000,
                  auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1,
                  auto_enroll=True, enroll_max=8, enroll_cooldown_ms=10000, enroll_stable=3):
         self.i2c = i2c
@@ -88,6 +89,9 @@ class HuskyStatus:
         self.poll_ms = poll_ms
         # 顔認識に切り替えた直後は、HuskyLens2 の準備を待つ。返事が少し遅れても、すぐには切らない。
         self.settle_ms = settle_ms
+        # 接続の確認(knock)のあと、顔認識に切り替えるまで待つ時間。ESP32 の再起動(EN)のあと、
+        # HuskyLens2 がメニュー画面に戻る途中で、切り替えを送ると、映像が出なくなることがあるため。
+        self.knock_settle_ms = knock_settle_ms
         self.max_miss = max_miss
         self.miss = 0  # 結果を読めなかった、連続の回数
         self.polled = False  # READY になってから、結果を、一度でも読めたか
@@ -152,25 +156,22 @@ class HuskyStatus:
                 self.state = FOUND
                 self._next = now  # すぐに接続を試す
         elif self.state == FOUND:
-            ok = False
             self.step = "knock"
             try:
                 ok = self.cam.knock()
-                if ok:
-                    self.step = "algo"
-                    ok = self.cam.switch_algorithm(self.algo)
             except OSError:
                 ok = False
-            if ok:
-                self.state = READY
-                self.err = ""
-                self.miss = 0
-                self.polled = False
-                self._next = now + self.settle_ms  # 準備ができるまで、少し待ってから、結果を読む
-            else:
-                self.err = (self.step + " failed")[:30]
+            if not ok:
+                self.err = "knock failed"
                 self.state = NOT_FOUND
                 self._next = now + self.retry_ms
+            elif self.knock_settle_ms > 0:
+                self.state = KNOCKED
+                self._next = now + self.knock_settle_ms
+            else:
+                self._switch(now)
+        elif self.state == KNOCKED:
+            self._switch(now)
         elif self.state == READY:
             self._next = now + self.poll_ms
             self.step = "result"
@@ -202,6 +203,24 @@ class HuskyStatus:
                 if self.faces > 0:
                     self._maybe_take_photo(now)
                 self._maybe_enroll(now)
+
+    def _switch(self, now):
+        """顔認識に切り替える。成功したら READY(少し待ってから、結果を読み始める)。"""
+        self.step = "algo"
+        try:
+            ok = self.cam.switch_algorithm(self.algo)
+        except OSError:
+            ok = False
+        if ok:
+            self.state = READY
+            self.err = ""
+            self.miss = 0
+            self.polled = False
+            self._next = now + self.settle_ms  # 準備ができるまで、少し待ってから、結果を読む
+        else:
+            self.err = "algo failed"
+            self.state = NOT_FOUND
+            self._next = now + self.retry_ms
 
     def toggle_enroll(self):
         """自動で覚えさせる機能の、入り切り。"""
@@ -286,6 +305,8 @@ class HuskyStatus:
             return ("not found", "red", "check wiring / power")
         if self.state == FOUND:
             return ("connecting", "yellow", "0x50 found")
+        if self.state == KNOCKED:
+            return ("connecting", "yellow", "waiting for HuskyLens2")
         if self.miss > 0:
             return ("no reply", "yellow", "miss %d/%d" % (self.miss, self.max_miss))
         if not self.polled:

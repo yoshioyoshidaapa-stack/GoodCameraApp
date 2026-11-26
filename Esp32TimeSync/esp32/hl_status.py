@@ -30,6 +30,18 @@ def id_color(person_id):
     return ID_COLORS[person_id % len(ID_COLORS)]
 
 
+def person_label(r):
+    """画面の一番大きい行に出す、人の呼び名(15字まで)。
+    ID 0 = まだ覚えていない顔 -> unknown / 名前が付いていれば名前 / なければ ID 番号。
+    ※ 名前の初期値 "Face" と、画面の文字(英数字のみ)で出せない名前は、使わない。"""
+    if r["id"] == 0:
+        return "unknown"
+    name = r["name"]
+    if name and name != "Face" and all(32 <= ord(c) < 127 for c in name):
+        return name[:15]
+    return "ID %d" % r["id"]
+
+
 def main_result(results):
     """複数の顔のうち、いちばん大きい顔(=いちばん近い人)を選ぶ。"""
     best = None
@@ -55,7 +67,8 @@ class HuskyStatus:
         self.miss = 0  # 結果を読めなかった、連続の回数
         self.polled = False  # READY になってから、結果を、一度でも読めたか
         self.faces = 0
-        self.first = None  # 最初の結果 (辞書)
+        self.ids = []  # 見えている顔の ID の一覧(最大6件)
+        self.first = None  # いちばん大きい顔の結果 (辞書)
         # 顔が見えたら写真を撮る(撮りすぎないよう、間隔と上限を決めてある)
         self.auto_photo = auto_photo
         self.photo_cooldown_ms = photo_cooldown_ms
@@ -130,12 +143,14 @@ class HuskyStatus:
                     self.state = NOT_FOUND
                     self._next = now + self.retry_ms
                     self.faces = 0
+                    self.ids = []
                     self.first = None
                     self.miss = 0
             else:
                 self.miss = 0
                 self.polled = True
                 self.faces = len(rs)
+                self.ids = [r["id"] for r in rs[:6]]
                 self.first = main_result(rs)
                 if self.faces > 0:
                     self._maybe_take_photo(now)
@@ -178,15 +193,11 @@ class HuskyStatus:
         if not self.polled:
             return ("starting", "yellow", "waiting for HuskyLens2")
         if self.first is None:
-            return ("faces:0", "green", "no face")
+            return ("no face", "white", "n=0")
         r = self.first
-        color = id_color(r["id"])
-        name = r["name"][:8]
-        if name:
-            extra = "ID%d %s x%d y%d" % (r["id"], name, r["x"], r["y"])
-        else:
-            extra = "ID%d x%d y%d %dx%d" % (r["id"], r["x"], r["y"], r["w"], r["h"])
-        return ("faces:%d" % self.faces, color, extra)
+        ids = ",".join([str(i) for i in self.ids])
+        extra = "n=%d ids=%s x%d y%d" % (self.faces, ids, r["x"], r["y"])
+        return (person_label(r), id_color(r["id"]), extra[:30])
 
     def person_color(self):
         """画面の色の帯に使う色の名前。顔がなければ "gray"。"""

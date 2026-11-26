@@ -54,8 +54,8 @@ def test_state_flow_ready():
     s.update(0)
     assert s.faces == 3 and s.first["x"] == 320, (s.faces, s.first)
     detail, color, extra = s.view()
-    assert detail == "faces:3" and color == "red", (detail, color)  # ID 1 は赤
-    assert extra == "ID1 Taro x320 y240", extra
+    assert detail == "Taro" and color == "red", (detail, color)  # ID 1 は赤。一番大きい行は人の名前
+    assert extra == "n=3 ids=1,2,3 x320 y240", extra  # 顔の数は小さい行
 
 
 def test_not_found_and_rescan():
@@ -230,8 +230,8 @@ def test_layout_husky_absent():
 def test_layout_husky_ready():
     fake = run_main(FakeBus(present=True), loops=60)
     check_layout(fake)
-    assert last_text(fake, 76) == "faces:3", last_text(fake, 76)
-    assert last_text(fake, 96) == "ID1 Taro x320 y240", last_text(fake, 96)
+    assert last_text(fake, 76) == "Taro", last_text(fake, 76)
+    assert last_text(fake, 96) == "n=3 ids=1,2,3 x320 y240", last_text(fake, 96)
     assert last_text(fake, 107) == "PHOTO ON 1 IMG_0001.jpg", last_text(fake, 107)
 
 
@@ -379,7 +379,7 @@ def test_waits_for_settle_before_first_poll():
     assert bus.result_requests == 0, "準備待ちの間は、結果を取りにいかない"
     s.update(2000)
     assert bus.result_requests == 1 and s.polled
-    assert s.view()[0] == "faces:3"
+    assert s.view()[0] == "Taro"
 
 
 def test_a_few_missed_replies_do_not_drop_connection():
@@ -395,7 +395,7 @@ def test_a_few_missed_replies_do_not_drop_connection():
     assert s.state == hl_status.READY and s.miss == 2
     s.update(2000)  # 3回目で返事が来る
     assert s.state == hl_status.READY and s.miss == 0 and s.faces == 3
-    assert s.view()[0] == "faces:3"
+    assert s.view()[0] == "Taro"
 
 
 def test_many_missed_replies_reconnect():
@@ -406,6 +406,37 @@ def test_many_missed_replies_reconnect():
         s.update(t)
     assert s.state == hl_status.NOT_FOUND and s.err == "result failed", (s.state, s.err)
     assert s.miss == 0
+
+
+# ---------- 人の呼び名 (一番大きい行) ----------
+def _r(id_, name="", w=10, h=10):
+    return {"id": id_, "name": name, "w": w, "h": h, "x": 1, "y": 2}
+
+
+def test_person_label_rules():
+    assert hl_status.person_label(_r(0)) == "unknown", "ID 0 = まだ覚えていない顔"
+    assert hl_status.person_label(_r(0, "Taro")) == "unknown"
+    assert hl_status.person_label(_r(1, "Taro")) == "Taro"
+    assert hl_status.person_label(_r(1, "Face")) == "ID 1", "名前の初期値 Face は、使わない"
+    assert hl_status.person_label(_r(2, "")) == "ID 2"
+    assert hl_status.person_label(_r(3, "\u592a\u90ce")) == "ID 3", "日本語の名前は画面の文字で出せないので、ID にする"
+    assert hl_status.person_label(_r(4, "A" * 30)) == "A" * 15
+
+
+def test_no_face_and_unknown_face_view():
+    bus = FakeBus(present=True)
+    bus.faces_present = False
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, auto_photo=False)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.view() == ("no face", "white", "n=0")
+    assert s.person_color() == "gray"
+    # 覚えていない顔(ID 0)だけが見えているとき
+    s.state, s.polled = hl_status.READY, True
+    s.faces, s.ids, s.first = 1, [0], _r(0, "", 100, 80)
+    detail, color, extra = s.view()
+    assert (detail, color) == ("unknown", "white"), (detail, color)
+    assert extra == "n=1 ids=0 x1 y2", extra
 
 
 def test_no_micropython_incompatible_calls():

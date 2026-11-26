@@ -44,7 +44,7 @@
 
 ## 作ったもの(ブランチ `claude/clever-galileo-xyqe6f`)
 - `Esp32TimeSync/`
-  - `esp32/main.py` : 画面の描画、BOOT ボタン、BLE の時刻受信(時刻は画面には出さない)
+  - `esp32/main.py` : 画面の描画(鳥・顔の2モード)、BOOT ボタン、BLE の時刻受信(時刻は画面には出さない)
   - `esp32/lcd.py` : 画面の部品 (init/clear/rect/text)
   - `esp32/hl_status.py` : HuskyLens2 の状態管理(接続、顔認識、写真、自動登録、バス復旧)
   - `app/` : Android アプリ (Kotlin + Compose, minSdk 31)。CompanionDeviceManager で基板を一度登録すると、近くに来たとき自動で時刻を GATT 書き込み。
@@ -52,14 +52,21 @@
 - `HuskyLens2/`
   - `huskylens2.py` : 公式 Arduino 部品(DFRobot_HuskylensV2 の ProtocolV2.cpp / Result.h)を MicroPython に書き直した I2C 部品
     (knock / switch_algorithm / get_results / take_photo / learn / learn_block / forget)
-  - `test_huskylens2.py`(7件) / `test_display.py`(41件) : パソコンの Python で動かす試験(ニセの HuskyLens2・ニセの画面を相手にする)
+  - `test_huskylens2.py`(7件) / `test_display.py`(54件) : パソコンの Python で動かす試験(ニセの HuskyLens2・ニセの画面を相手にする)
   - 調査用: `hl_debug.py`(返事の生の数字) / `hl_debug2.py`(結果の返事) / `hl_demo.py` / `hl_line_check.py`(SDA/SCL の状態) /
     `hl_step.py`(命令を1つずつ) / `hl_photo_test.py` / `hl_poll_test.py` / `hl_knock_test.py` / `hl_knock_nowait.py`
   - `docs/wiring.png` / `wiring.svg` : 配線図、`docs/display_mock.png` : 画面の見本(近似)
 - 基板に入れるファイル: `lcd.py`, `huskylens2.py`, `hl_status.py`, `main.py`
 - 入れ方の例: `python3 -m mpremote connect /dev/cu.usbserial-8340 cp hl_status.py :hl_status.py`
 
-## 画面(240x135、時計は無し)
+## 鳥の画面(既定のモード。実機では、まだ試していない)
+- 物体認識(80種類。algo=2)で、名前が `bird` の結果だけを数える。画面の左に、視野(640x480)の 1/4 の地図と、鳥の黄色い枠。右に、鳥の数・自信・位置・写真・見えた物の名前・BLE。
+- BOOT ボタンを4秒以上で、鳥 ⇔ 顔 のモード切り替え。モードは `mode.txt` に残る(なければ鳥)。鳥のときは、自動登録はしない。写真は、鳥が見えたら撮る。
+- 画面の見本: `HuskyLens2/docs/display_mock_bird.png`。確認用: `HuskyLens2/hl_object_debug.py`(結果をそのまま表示)。
+- 未確認: 結果の名前に、本当に `bird` と入るか。位置(x,y,幅,高さ)が出るか。小さく速い鳥を、見つけられるか。
+  公式 Wiki: 物体認識は「同じ種類の中の違い(スズメかハトか)」は、見分けられない。物体分類(1000種類)は位置が出ない。自己学習分類は、位置が出るかが不明。
+
+## 画面(顔認識のモード。240x135、時計は無し)
 - y=2: 人の呼び名(大。文字数で 4/3/2 倍): `ID01` / 名前(英数字のみ) / `unknown`(ID 0) / `NEW ID01`(登録直後 5 秒) / `SHOOT`(写真を撮る間)
 - y=40: 色の帯(ID ごとの色。0=白,1=赤,2=緑,3=青,4=黄,5=紫,6=水色,7=橙。顔がなければ灰色、撮影中は白)
 - y=52: `n=顔の数 ids=全員のID` / y=72: `PHOTO ON 3` / y=92: `ENR ON 2` / y=110: 詳細 / y=122: BLE の状態

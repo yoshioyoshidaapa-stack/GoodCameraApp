@@ -67,6 +67,15 @@ def person_label(r):
     return "ID%02d" % r["id"]
 
 
+def mode_settings(mode):
+    """画面のモード -> (認識の種類, 探す名前)。 face = 顔認識 / bird = 物体認識で、名前が bird のものだけ。"""
+    if hl is None:
+        return (0, None)
+    if mode == "bird":
+        return (hl.ALGO_OBJECT_RECOGNITION, "bird")
+    return (hl.ALGO_FACE_RECOGNITION, None)
+
+
 def main_result(results):
     """複数の顔のうち、いちばん大きい顔(=いちばん近い人)を選ぶ。"""
     best = None
@@ -77,7 +86,7 @@ def main_result(results):
 
 
 class HuskyStatus:
-    def __init__(self, i2c, algo=None, scan_ms=3000, retry_ms=3000, poll_ms=1000,
+    def __init__(self, i2c, algo=None, target=None, scan_ms=3000, retry_ms=3000, poll_ms=1000,
                  settle_ms=2000, max_miss=5, knock_settle_ms=4000,
                  auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1,
                  auto_enroll=True, enroll_max=8, enroll_cooldown_ms=10000, enroll_stable=3):
@@ -95,9 +104,13 @@ class HuskyStatus:
         self.max_miss = max_miss
         self.miss = 0  # 結果を読めなかった、連続の回数
         self.polled = False  # READY になってから、結果を、一度でも読めたか
-        self.faces = 0
+        # target: 探す物の名前(例 "bird")。None なら、見えたものを、すべて数える(顔認識)。
+        self.target = target.lower() if target else None
+        self.seen = ""  # 見えたものの名前(最大3つ。名前が読めているかの確認用)
+        self.boxes = []  # 探している物の枠 (x, y, 幅, 高さ, 自信) の一覧(最大8件)。座標は 640x480
+        self.faces = 0  # 探している物の数(顔認識なら、顔の数)
         self.ids = []  # 見えている顔の ID の一覧(最大6件)
-        self.first = None  # いちばん大きい顔の結果 (辞書)
+        self.first = None  # いちばん大きい顔(物)の結果 (辞書)
         # 顔が見えたら写真を撮る(撮りすぎないよう、間隔と上限を決めてある)
         self.auto_photo = auto_photo
         self.photo_cooldown_ms = photo_cooldown_ms
@@ -188,6 +201,7 @@ class HuskyStatus:
                     self._next = now + self.retry_ms
                     self.faces = 0
                     self.ids = []
+                    self.boxes = []
                     self.first = None
                     self.new_id = 0
                     self._stable = 0
@@ -196,6 +210,15 @@ class HuskyStatus:
                 self.miss = 0
                 self.err = ""
                 self.polled = True
+                names = []
+                for r in rs:
+                    n = r["name"].strip()
+                    if n and n not in names:
+                        names.append(n)
+                self.seen = ",".join(names[:3])[:20]
+                if self.target:  # 探している名前の物だけにする(例: bird)
+                    rs = [r for r in rs if r["name"].strip().lower() == self.target]
+                self.boxes = [(r["x"], r["y"], r["w"], r["h"], r["conf"]) for r in rs[:8]]
                 self.faces = len(rs)
                 self.ids = [r["id"] for r in rs[:6]]
                 self.first = main_result(rs)
@@ -221,6 +244,23 @@ class HuskyStatus:
         self.polled = False
         self._next = now + self.settle_ms  # 準備ができるまで、少し待ってから、結果を読む
 
+    def set_algo(self, algo, target, now):
+        """認識の種類(と探す名前)を変える。接続は、そのままで、すぐに、切り替えを送り直す。"""
+        self.algo = algo
+        self.target = target.lower() if target else None
+        self.faces = 0
+        self.ids = []
+        self.boxes = []
+        self.first = None
+        self.seen = ""
+        self.new_id = 0
+        self._stable = 0
+        self.miss = 0
+        self.polled = False
+        if self.state in (READY, KNOCKED, FOUND):
+            self.state = KNOCKED
+            self._next = now  # 次の update で、切り替えを送る
+
     def toggle_enroll(self):
         """自動で覚えさせる機能の、入り切り。"""
         self.auto_enroll = not self.auto_enroll
@@ -228,6 +268,9 @@ class HuskyStatus:
         return self.auto_enroll
 
     def _maybe_enroll(self, now):
+        if self.target:  # 鳥など、顔以外のときは、覚えさせない
+            self._stable = 0
+            return
         r = self.first
         # 覚えさせてよい顔: 見えているのが1人だけで、まだ覚えていない顔(ID 0)で、
         # ある程度大きく、画面の中央の十字が、顔の枠の中にある(本体の Button-A と同じ条件)
@@ -318,6 +361,10 @@ class HuskyStatus:
         if self.new_id:
             return ("NEW ID%02d" % self.new_id, id_color(self.new_id), extra[:30])
         return (person_label(r), id_color(r["id"]), extra[:30])
+
+    def is_ready(self):
+        """結果が、ちゃんと読めている状態か(つながっていて、準備ができていて、直近の読み取りも成功)。"""
+        return self.state == READY and self.polled and self.miss == 0
 
     def summary(self):
         """大きい文字で出す、顔の数と ID の一覧(15字まで)。顔が見えていなければ空。"""

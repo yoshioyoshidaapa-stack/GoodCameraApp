@@ -122,8 +122,15 @@ class _Stop(Exception):
     pass
 
 
-def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, frame_ends=None):
+def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, frame_ends=None, mode="face"):
     """main.py を、ニセの部品で、loops 回だけ動かして、描いた内容を返す。"""
+    import tempfile
+    workdir = tempfile.mkdtemp()  # mode.txt を、試験ごとに、独立させる
+    old_cwd = os.getcwd()
+    os.chdir(workdir)
+    if mode:
+        with open("mode.txt", "w") as f:
+            f.write(mode)
     fake_lcd = FakeLcd()
     bus.fake_lcd = fake_lcd
 
@@ -200,6 +207,8 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, f
         except _Stop:
             pass
     finally:
+        fake_lcd.mode_file = open("mode.txt").read() if os.path.exists("mode.txt") else None
+        os.chdir(old_cwd)
         for k, v in real.items():
             if v is None:
                 delattr(time, k)
@@ -213,22 +222,42 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, f
     return fake_lcd
 
 
+def _overlaps(boxes):
+    keys = sorted(boxes)
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            ax0, ay0, ax1, ay1 = a[0], a[1], a[0] + boxes[a][0], a[1] + boxes[a][1]
+            bx0, by0, bx1, by1 = b[0], b[1], b[0] + boxes[b][0], b[1] + boxes[b][1]
+            if ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1:
+                return a, b
+    return None
+
+
 def check_layout(fake_lcd):
-    ranges = {}
-    for s, x, y, col, scale in fake_lcd.texts:
-        w = len(s) * 8 * scale
-        h = 8 * scale
-        assert x >= 0 and y >= 0, (s, x, y)
-        assert x + w <= 240, "横にはみ出し: %r x=%d w=%d" % (s, x, w)
-        assert y + h <= 135, "縦にはみ出し: %r y=%d h=%d" % (s, y, h)
-        ranges[y] = max(ranges.get(y, 0), y + h)
-    ys = sorted(ranges.items())
-    for (a0, a1), (b0, b1) in zip(ys, ys[1:]):
-        assert a1 <= b0, "行が重なっている: y=%d..%d と y=%d" % (a0, a1, b0)
+    """文字が画面からはみ出さないか。同じ画面(=全部を消してから、次に全部を消すまで)の中で、文字の場所が重ならないか。"""
+    epochs = [{}]
+    for ev in fake_lcd.events:
+        if ev[0] == "rect" and ev[1:5] == (0, 0, 240, 135):  # 画面を全部消した = 画面の切り替え
+            epochs.append({})
+        elif ev[0] == "text":
+            _, s, x, y, col, scale = ev
+            w = len(s) * 8 * scale
+            h = 8 * scale
+            assert x >= 0 and y >= 0, (s, x, y)
+            assert x + w <= 240, "横にはみ出し: %r x=%d w=%d" % (s, x, w)
+            assert y + h <= 135, "縦にはみ出し: %r y=%d h=%d" % (s, y, h)
+            old = epochs[-1].get((x, y), (0, 0))
+            epochs[-1][(x, y)] = (max(old[0], w), max(old[1], h))
+    for boxes in epochs:
+        hit = _overlaps(boxes)
+        assert hit is None, "文字の場所が重なっている: %r と %r" % hit
     for x, y, w, h in fake_lcd.rects:
         assert x + w <= 240 and y + h <= 135, ("線がはみ出し", x, y, w, h)
-    # 大きい文字の行(y=2)と、色の帯(y=40)も、重ならない
-    assert ranges.get(2, 0) <= 40, "大きい文字が、色の帯に、かかっている"
+
+
+def last_text_at(fake_lcd, x, y):
+    found = [t for t in fake_lcd.texts if t[1] == x and t[2] == y]
+    return found[-1][0].rstrip() if found else None
 
 
 def last_text(fake_lcd, y):
@@ -767,6 +796,144 @@ def test_unreadable_results_after_failed_switch_reconnect():
     s.update(1000)
     s.update(2000)  # 結果が2回続けて読めない -> つなぎ直す
     assert s.state == hl_status.NOT_FOUND and s.err == "result failed", (s.state, s.err)
+
+
+# ---------- 鳥の機能 (物体認識で bird を探し、画面に位置を出す) ----------
+BIRDS = [("bird", 0, 200, 120, 60, 50, 0.8), ("person", 0, 320, 240, 200, 400, 0.9), ("bird", 0, 500, 300, 100, 80, 0.6)]
+
+
+def _bird_status(objects, **kw):
+    bus = FakeBus(present=True)
+    bus.objects = objects
+    args = dict(target="bird", settle_ms=0, knock_settle_ms=0, max_miss=1, auto_photo=False)
+    args.update(kw)
+    return bus, hl_status.HuskyStatus(bus, **args)
+
+
+def test_mode_settings():
+    assert hl_status.mode_settings("bird") == (hl.ALGO_OBJECT_RECOGNITION, "bird")
+    assert hl_status.mode_settings("face") == (hl.ALGO_FACE_RECOGNITION, None)
+
+
+def test_bird_filter_keeps_only_birds():
+    bus, s = _bird_status(BIRDS)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.faces == 2, "鳥は2羽(人は数えない)"
+    assert s.seen == "bird,person", s.seen
+    assert s.boxes == [(200, 120, 60, 50, s.boxes[0][4]), (500, 300, 100, 80, s.boxes[1][4])]
+    assert s.first["x"] == 500, "いちばん大きい鳥が、代表"
+    assert s.is_ready()
+
+
+def test_bird_filter_with_only_person():
+    bus, s = _bird_status([BIRDS[1]])
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.faces == 0 and s.boxes == [] and s.first is None and s.seen == "person"
+
+
+def test_no_enroll_in_bird_mode():
+    bus, s = _bird_status([("bird", 0, 320, 240, 200, 200, 0.9)], enroll_stable=1)
+    for t in (0, 0, 0, 1000, 2000, 3000):
+        s.update(t)
+    assert bus.learn_requests == 0, "鳥のときは、覚えさせない"
+
+
+def test_photo_only_when_bird_is_seen():
+    bus, s = _bird_status([BIRDS[1]], auto_photo=True)
+    for t in (0, 0, 0, 1000):
+        s.update(t)
+    assert bus.photo_requests == 0, "人だけのときは、撮らない"
+    bus.objects = [BIRDS[0]]
+    s.update(2000)
+    assert bus.photo_requests == 1, "鳥が見えたら、撮る"
+
+
+def test_set_algo_switches_without_reconnecting():
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, knock_settle_ms=0, max_miss=1, auto_photo=False, auto_enroll=False)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.state == hl_status.READY and bus.algo == hl.ALGO_FACE_RECOGNITION
+    s.set_algo(hl.ALGO_OBJECT_RECOGNITION, "bird", 1000)
+    assert s.state == hl_status.KNOCKED and s.faces == 0 and s.boxes == [] and s.target == "bird"
+    s.update(1000)
+    assert bus.algo == hl.ALGO_OBJECT_RECOGNITION and s.state == hl_status.READY and not s.polled
+
+
+def _bird_run(objects, loops=140, **kw):
+    bus = FakeBus(present=True)
+    bus.objects = objects
+    return bus, run_main(bus, loops=loops, mode="bird", **kw)
+
+
+def _yellow_rects(fake):
+    return [e for e in fake.events if e[0] == "rect" and e[5] == 0xFFE0]
+
+
+def test_bird_screen_shows_count_and_position():
+    bus, fake = _bird_run(BIRDS)
+    check_layout(fake)
+    assert last_text_at(fake, 164, 8) == "BIRD"
+    assert last_text_at(fake, 164, 28) == "x2"
+    assert last_text_at(fake, 164, 56) == "60%", "いちばん大きい鳥の自信"
+    assert last_text_at(fake, 164, 78) == "x500 y300"
+    assert last_text_at(fake, 164, 102) == "bird,pers"
+    # 地図に、鳥の黄色い枠が、描かれている(例: 鳥 x500,y300 -> 地図の中心 (125, 83))
+    near = [e for e in _yellow_rects(fake) if 100 <= e[1] <= 150 and 60 <= e[2] <= 100]
+    assert near, "鳥の位置に、黄色い枠がない"
+    for e in _yellow_rects(fake):
+        _, x, y, w, h, _c = e
+        assert 0 <= x and x + w <= 160 and 8 <= y and y + h <= 128, ("枠が、地図からはみ出し", e)
+
+
+def test_bird_screen_with_no_bird():
+    bus, fake = _bird_run([BIRDS[1]])
+    check_layout(fake)
+    assert last_text_at(fake, 164, 28) == "x0"
+    assert last_text_at(fake, 164, 56) == "" and last_text_at(fake, 164, 78) == ""
+    assert not _yellow_rects(fake), "鳥がいないときは、枠を描かない"
+
+
+def test_bird_wait_screen_before_connection():
+    fake = run_main(FakeBus(present=False), loops=30, mode="bird")
+    check_layout(fake)
+    assert last_text_at(fake, 0, 50) == "not found"
+    assert last_text_at(fake, 0, 76) == "check wiring / power"
+
+
+def test_bird_screen_shows_shoot_before_photo():
+    bus = FakeBus(present=True)
+    bus.objects = [BIRDS[0]]
+    fake = run_main(bus, loops=140, mode="bird")
+    shoot = [t for t in fake.texts if t[0] == "SHOOT"]
+    assert shoot and shoot[0][1:3] == (20, 56) and shoot[0][4] == 3, "地図の上に SHOOT が出ていない"
+    assert bus.shoot_before_photo is True, "写真を頼む前に、SHOOT を描いていない"
+
+
+def test_default_mode_is_bird_when_no_file():
+    bus = FakeBus(present=True)
+    fake = run_main(bus, loops=140, mode=None)
+    assert last_text_at(fake, 164, 8) == "BIRD"
+
+
+def test_boot_very_long_press_switches_mode_and_saves_it():
+    bus = FakeBus(present=True)
+    bus.objects = [BIRDS[0]]
+    pattern = [1] * 60 + [0] * 45 + [1]  # 準備ができたあと、4.5秒押し続ける
+    fake = run_main(bus, loops=200, mode="bird", boot_pattern=pattern)
+    assert fake.mode_file == "face", "モードを、基板(mode.txt)に残す"
+    assert bus.algo == hl.ALGO_FACE_RECOGNITION, "顔認識に、切り替える命令を送る"
+    labels = [t for t in fake.texts if t[2] == 2 and t[1] == 0]
+    assert labels, "顔認識の画面が、描かれている"
+
+
+def test_boot_between_1_5_and_4_seconds_does_not_switch_mode():
+    bus = FakeBus(present=True)
+    pattern = [1] * 60 + [0] * 25 + [1]  # 2.5秒
+    fake = run_main(bus, loops=140, mode="face", boot_pattern=pattern)
+    assert fake.mode_file == "face"
 
 
 def test_no_micropython_incompatible_calls():

@@ -38,6 +38,7 @@ class FakeI2C:
         self.learn_fail = False
         self.last_block = None
         self.forgot = False
+        self.objects = None  # 物体認識の結果: [(名前, id, x, y, 幅, 高さ, 自信), ...]。None なら使わない
 
     def writeto(self, addr, buf):
         assert addr == 0x50
@@ -98,6 +99,12 @@ class FakeI2C:
             self.out += frame(hl.CMD_RETURN_ARGS, 0, bytes([0, 0]) + bytes(12))
         elif cmd == hl.CMD_GET_RESULT and self._skip_result():
             return
+        elif cmd == hl.CMD_GET_RESULT and self.objects is not None:
+            n = len(self.objects)
+            info = struct.pack("<BbhhhhI", 0, 0, n, 0, n, 0, 0)[:14]
+            self.out += frame(hl.CMD_RETURN_INFO, algo, info)
+            for (name, id_, x, y, w, h, conf) in self.objects:
+                self.out += frame(hl.CMD_RETURN_BLOCK, algo, result_data(id_, x, y, w, h, conf, name))
         elif cmd == hl.CMD_GET_RESULT and self.unknown_mode:
             info = struct.pack("<BbhhhhI", self.learned_id, 0, 1, 1 if self.learned_id else 0, 1, 1, 0)[:14]
             self.out += frame(hl.CMD_RETURN_INFO, algo, info)

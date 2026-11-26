@@ -1,4 +1,13 @@
-# ESP32 側: HuskyLens2 の顔認識の結果を、大きく画面に出す(時計の表示はやめた)
+# ESP32 側: HuskyLens2 の認識の結果を、大きく画面に出す(時計の表示はやめた)
+#
+# モードが 2 つある(BOOT ボタンを 4 秒以上 押し続けると切り替わる。選んだ方は mode.txt に残る):
+#   bird = 物体認識(80種類)で「bird(鳥)」を探して、画面の左の「地図」に、鳥の位置を描く(既定)
+#   face = 顔認識(下に説明する画面)
+#
+# 鳥の画面 (240x135): 左 = カメラの視野(640x480)を 1/4 にした地図と、鳥の黄色い枠。
+#   右 = BIRD / 鳥の数 / 自信 / 位置(x, y) / 写真 / 見えた物の名前 / BLE
+#
+# 以下は、顔認識の画面:
 #
 # 画面 (240x135):
 #   y=2   人の呼び名 (大: 文字数に応じて 4/3/2 倍。例: ID01 / unknown / NEW ID01 / SHOOT)
@@ -12,8 +21,9 @@
 # 写真を撮る(約0.3〜2.5秒かかる)直前に、画面の一番上に「SHOOT」を出す。
 #
 # BOOT ボタン(基板の「BOOT」):
-#   短く押す      = 顔が見えたら写真を撮る機能の、入り切り
-#   1.5秒以上押す = 知らない顔を自動で覚えさせる(ID01, ID02 …)機能の、入り切り
+#   短く押す          = 見えたら写真を撮る機能の、入り切り
+#   1.5〜4秒押す      = 知らない顔を自動で覚えさせる(ID01, ID02 …)機能の、入り切り(顔認識のとき)
+#   4秒以上押し続ける = 鳥 <-> 顔 のモード切り替え
 #
 # 時刻は、いまも BLE で受け取れる(Android アプリはそのまま使える)が、画面には出さない。
 #
@@ -103,7 +113,29 @@ def pad(s, n):
     return (s + " " * n)[:n]
 
 
-def make_husky():
+MODE_FILE = "mode.txt"
+MAP_X, MAP_Y, MAP_W, MAP_H = 0, 8, 160, 120  # 鳥の画面: カメラの視野(640x480)を 1/4 にした地図の場所
+
+
+def load_mode():
+    """前回選んだモード(bird / face)を読む。なければ bird。"""
+    try:
+        with open(MODE_FILE) as f:
+            m = f.read().strip()
+        return m if m in ("bird", "face") else "bird"
+    except OSError:
+        return "bird"
+
+
+def save_mode(mode):
+    try:
+        with open(MODE_FILE, "w") as f:
+            f.write(mode)
+    except OSError:
+        pass
+
+
+def make_husky(mode="face"):
     """HuskyLens2 の状態表示を用意する。部品がなくても、動きは止めない。"""
     if hl_status is None:
         return None
@@ -117,7 +149,8 @@ def make_husky():
         i2c = machine.I2C(0, sda=machine.Pin(21), scl=machine.Pin(22), freq=100000)
     except Exception:
         i2c = None
-    return hl_status.HuskyStatus(i2c)
+    algo, target = hl_status.mode_settings(mode)
+    return hl_status.HuskyStatus(i2c, algo=algo, target=target)
 
 
 def big_scale(text):
@@ -134,31 +167,32 @@ def main():
     lcd.init()
     lcd.clear()
     clock = Clock()  # BLE で時刻を受け取る(画面には出さない)
-    husky = make_husky()
+    state = {"mode": load_mode()}
+    husky = make_husky(state["mode"])
     colors = {
         "red": lcd.RED, "yellow": lcd.YELLOW, "green": lcd.GREEN, "blue": lcd.BLUE,
         "white": lcd.WHITE, "cyan": lcd.CYAN, "magenta": MAGENTA, "orange": ORANGE, "gray": GRAY,
     }
     cache = {}
 
-    def row(key, s, y, col, scale):
+    def row(key, s, y, col, scale, x=0, width=240):
         """文字が変わったときだけ描く。同じ行の倍率が変わったときは、行を黒で消してから描く。"""
         v = (s, col, scale)
         old = cache.get(key)
         if old == v:
             return
         if old is not None and old[2] != scale:
-            lcd.rect(0, y, 240, 8 * max(old[2], scale), lcd.BLACK)
+            lcd.rect(x, y, width, 8 * max(old[2], scale), lcd.BLACK)
         cache[key] = v
-        lcd.text(s, 0, y, col, scale)
+        lcd.text(s, x, y, col, scale)
 
     def bar(color):
         if cache.get("bar") != color:
             cache["bar"] = color
             lcd.rect(0, 40, 240, 8, color)
 
-    def draw():
-        """画面全体を描く(変わったところだけ)。写真を撮る直前にも呼ばれる。"""
+    def draw_face():
+        """顔認識の画面を描く(変わったところだけ)。"""
         if husky is not None:
             label, label_color, extra = husky.view()
             bar_color = colors[husky.person_color()]
@@ -188,6 +222,93 @@ def main():
             ble = "BLE: waiting..."
         row("ble", pad(ble, 30), 122, lcd.GREEN, 1)
 
+    def map_box(x, y, w, h, color):
+        """鳥の枠を、地図に描く。x, y = 枠の中心、w, h = 幅・高さ (どれも 640x480 の座標)。"""
+        cx = MAP_X + x // 4
+        cy = MAP_Y + y // 4
+        bw = max(w // 4, 6)
+        bh = max(h // 4, 6)
+        x0 = max(MAP_X + 1, cx - bw // 2)
+        y0 = max(MAP_Y + 1, cy - bh // 2)
+        x1 = min(MAP_X + MAP_W - 2, cx + bw // 2)
+        y1 = min(MAP_Y + MAP_H - 2, cy + bh // 2)
+        if x1 <= x0 or y1 <= y0:
+            return
+        lcd.rect(x0, y0, x1 - x0 + 1, 2, color)
+        lcd.rect(x0, y1 - 1, x1 - x0 + 1, 2, color)
+        lcd.rect(x0, y0, 2, y1 - y0 + 1, color)
+        lcd.rect(x1 - 1, y0, 2, y1 - y0 + 1, color)
+        lcd.rect(max(MAP_X + 1, min(cx - 1, MAP_X + MAP_W - 4)), max(MAP_Y + 1, min(cy - 1, MAP_Y + MAP_H - 4)), 3, 3, color)
+
+    def to_screen(name):
+        """"map"(地図の画面) か "wait"(つながるまでの文字だけの画面) に切り替わるとき、全部を消す。"""
+        if cache.get("screen") != name:
+            lcd.rect(0, 0, 240, 135, lcd.BLACK)
+            cache.clear()
+            cache["screen"] = name
+
+    def draw_bird():
+        """鳥の画面を描く: 左=地図と鳥の枠、右=数・自信・位置など(変わったところだけ)。"""
+        if husky is None:
+            to_screen("wait")
+            row("w_label", pad("no driver", 10), 50, lcd.RED, 2, 0, 160)
+            row("w_hint", pad("hl_status.py missing", 20), 76, lcd.WHITE, 1, 0, 160)
+            return
+        if not husky.is_ready():
+            label, color, hint = husky.view()
+            to_screen("wait")
+            row("w_label", pad(label, 10), 50, colors[color], 2, 0, 160)
+            row("w_hint", pad(hint, 20), 76, lcd.WHITE, 1, 0, 160)
+            return
+        to_screen("map")
+        boxes = husky.boxes
+        shoot = husky.shoot_show
+        sig = (tuple([(b[0] // 8, b[1] // 8, b[2] // 8, b[3] // 8) for b in boxes]), shoot)
+        if cache.get("map") != sig:  # 鳥の位置が変わったときだけ、地図を描き直す
+            cache["map"] = sig
+            lcd.rect(MAP_X, MAP_Y, MAP_W, MAP_H, lcd.BLACK)
+            lcd.rect(MAP_X, MAP_Y, MAP_W, 1, GRAY)
+            lcd.rect(MAP_X, MAP_Y + MAP_H - 1, MAP_W, 1, GRAY)
+            lcd.rect(MAP_X, MAP_Y, 1, MAP_H, GRAY)
+            lcd.rect(MAP_X + MAP_W - 1, MAP_Y, 1, MAP_H, GRAY)
+            for b in boxes:
+                map_box(b[0], b[1], b[2], b[3], lcd.YELLOW)
+            if shoot:  # 写真を撮っている間は「SHOOT」
+                lcd.text("SHOOT", 20, 56, lcd.WHITE, 3)
+        n = husky.faces
+        first = husky.first
+        conf = ""
+        pos = ""
+        if first is not None:
+            c = first["conf"]
+            conf = "%d%%" % int(c * 100 if c <= 1 else c)
+            pos = "x%d y%d" % (first["x"], first["y"])
+        row("b_title", "BIRD", 8, lcd.CYAN, 2, 164, 76)
+        row("b_count", pad("x%d" % n, 3), 28, lcd.YELLOW if n else GRAY, 3, 164, 76)
+        row("b_conf", pad(conf, 4), 56, lcd.WHITE, 2, 164, 76)
+        row("b_pos", pad(pos, 9), 78, lcd.WHITE, 1, 164, 76)
+        row("b_photo", pad("PH:%s %d" % ("ON" if husky.auto_photo else "OFF", husky.photos), 9), 90, lcd.YELLOW, 1, 164, 76)
+        row("b_seen", pad(husky.seen, 9), 102, lcd.GREEN, 1, 164, 76)
+        row("b_ble", pad("BLE ok" if clock.conn is not None else "BLE ..", 9), 114, lcd.GREEN, 1, 164, 76)
+
+    def draw():
+        """いまのモードの画面を描く。写真を撮る直前にも呼ばれる。"""
+        if state["mode"] == "bird":
+            draw_bird()
+        else:
+            to_screen("face")
+            draw_face()
+
+    def switch_mode():
+        """鳥 <-> 顔 を切り替える。選んだモードは、基板に残す(電源を入れ直しても、そのまま)。"""
+        state["mode"] = "face" if state["mode"] == "bird" else "bird"
+        save_mode(state["mode"])
+        if husky is not None:
+            algo, target = hl_status.mode_settings(state["mode"])
+            husky.set_algo(algo, target, time.ticks_ms())
+        lcd.rect(0, 0, 240, 135, lcd.BLACK)
+        cache.clear()
+
     if husky is not None:
         husky.shoot_cb = draw
     boot = machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP)  # BOOT ボタン
@@ -203,7 +324,9 @@ def main():
             elif boot_down_at is not None:
                 held = time.ticks_diff(time.ticks_ms(), boot_down_at)
                 boot_down_at = None
-                if held >= 1500:
+                if held >= 4000:
+                    switch_mode()
+                elif held >= 1500:
                     husky.toggle_enroll()
                 elif held >= 30:
                     husky.toggle_photo()

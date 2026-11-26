@@ -8,9 +8,11 @@
 #   y=76  HuskyLens2 の状態 (not found / connecting / faces:N。文字も人ごとの色)
 #   y=96  人の詳細 (ID・名前・位置)
 #   y=107 写真の状態 (PHOTO ON/OFF  撮った枚数  直近のファイル名)
-#   y=118 Bluetooth の状態
+#   y=118 Bluetooth の状態 と 自動登録の状態 (ENR ON/OFF 人数)
 #
-# BOOT ボタン(基板の「BOOT」)を押すと、顔が見えたら写真を撮る機能が、入り切りできる。
+# BOOT ボタン(基板の「BOOT」):
+#   短く押す      = 顔が見えたら写真を撮る機能の、入り切り
+#   1.5秒以上押す = 知らない顔を自動で覚えさせる(ID01, ID02 …)機能の、入り切り
 #
 # 基板に入れるファイル: lcd.py, hl_status.py, huskylens2.py (なくても時計は動く), main.py
 
@@ -122,7 +124,7 @@ def main():
     }
     cache = {}
     boot = machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP)  # BOOT ボタン
-    boot_down = False
+    boot_down_at = None  # BOOT ボタンを押し始めた時刻
 
     def row(key, s, x, y, col, scale):
         v = (s, col)
@@ -133,13 +135,17 @@ def main():
     while True:
         if husky is not None:
             husky.update(time.ticks_ms())
-            # BOOT ボタンで、写真を撮る機能を入り切りする(押した瞬間に1回だけ)
+            # BOOT ボタン: 短押しは写真の入り切り、1.5秒以上の長押しは自動登録の入り切り(離したときに判定)
             if boot.value() == 0:
-                if not boot_down:
-                    boot_down = True
+                if boot_down_at is None:
+                    boot_down_at = time.ticks_ms()
+            elif boot_down_at is not None:
+                held = time.ticks_diff(time.ticks_ms(), boot_down_at)
+                boot_down_at = None
+                if held >= 1500:
+                    husky.toggle_enroll()
+                elif held >= 30:
                     husky.toggle_photo()
-            else:
-                boot_down = False
         t = time.localtime()
         if clock.synced:
             hhmmss = "%02d:%02d:%02d" % (t[3], t[4], t[5])
@@ -175,7 +181,8 @@ def main():
             ble = "ERR: " + clock.last_error
         else:
             ble = "BLE: waiting..."
-        row("ble", pad(ble, 30), 0, 118, lcd.GREEN, 1)
+        enr = husky.enroll_line() if husky is not None else "ENR -"
+        row("ble", pad(pad(ble, 16) + enr, 30), 0, 118, lcd.GREEN, 1)
         time.sleep_ms(100)
 
 

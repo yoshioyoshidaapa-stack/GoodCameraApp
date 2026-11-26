@@ -116,7 +116,7 @@ class _Stop(Exception):
     pass
 
 
-def run_main(bus, loops, with_hl_status=True, synced=False):
+def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None):
     """main.py を、ニセの部品で、loops 回だけ動かして、描いた内容を返す。"""
     fake_lcd = FakeLcd()
 
@@ -155,7 +155,10 @@ def run_main(bus, loops, with_hl_status=True, synced=False):
             self.n = n
 
         def value(self):
-            return 1  # BOOT ボタンは押されていない
+            # BOOT ボタン: 1 = 押していない / 0 = 押している。1ループごとに1つ使う
+            if boot_pattern:
+                return boot_pattern.pop(0)
+            return 1
 
     mach.Pin = FakePin
     mach.I2C = lambda *a, **k: bus
@@ -224,7 +227,7 @@ def test_layout_husky_absent():
     assert last_text(fake, 4) == "--:--:--"
     assert last_text(fake, 34) == "NO SYNC"
     assert last_text(fake, 76) == "not found"
-    assert last_text(fake, 118) == "BLE: waiting..."
+    assert last_text(fake, 118) == "BLE: waiting... ENR ON 0", last_text(fake, 118)
 
 
 def test_layout_husky_ready():
@@ -417,9 +420,9 @@ def test_person_label_rules():
     assert hl_status.person_label(_r(0)) == "unknown", "ID 0 = まだ覚えていない顔"
     assert hl_status.person_label(_r(0, "Taro")) == "unknown"
     assert hl_status.person_label(_r(1, "Taro")) == "Taro"
-    assert hl_status.person_label(_r(1, "Face")) == "ID 1", "名前の初期値 Face は、使わない"
-    assert hl_status.person_label(_r(2, "")) == "ID 2"
-    assert hl_status.person_label(_r(3, "\u592a\u90ce")) == "ID 3", "日本語の名前は画面の文字で出せないので、ID にする"
+    assert hl_status.person_label(_r(1, "Face")) == "ID01", "名前の初期値 Face は、使わない"
+    assert hl_status.person_label(_r(2, "")) == "ID02"
+    assert hl_status.person_label(_r(3, "\u592a\u90ce")) == "ID03", "日本語の名前は画面の文字で出せないので、ID にする"
     assert hl_status.person_label(_r(4, "A" * 30)) == "A" * 15
 
 
@@ -437,6 +440,144 @@ def test_no_face_and_unknown_face_view():
     detail, color, extra = s.view()
     assert (detail, color) == ("unknown", "white"), (detail, color)
     assert extra == "n=1 ids=0 x1 y2", extra
+
+
+# ---------- 自動で覚えさせる (ID01, ID02 …) ----------
+def test_learn_returns_new_id():
+    bus = FakeBus(present=True)
+    cam = hl.HuskyLens2(bus, timeout_ms=500)
+    assert cam.learn(hl.ALGO_FACE_RECOGNITION) == 1
+    assert cam.learn(hl.ALGO_FACE_RECOGNITION) == 2
+    assert cam.learn_block(hl.ALGO_FACE_RECOGNITION, 320, 240, 100, 90) == 3
+    assert bus.last_block == (320, 240, 100, 90)
+    bus.learn_fail = True
+    assert cam.learn(hl.ALGO_FACE_RECOGNITION) == 0
+    assert cam.forget(hl.ALGO_FACE_RECOGNITION) is True and bus.forgot
+
+
+def test_auto_enroll_after_stable_seconds():
+    bus = FakeBus(present=True)
+    bus.unknown_mode = True
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, poll_ms=1000, auto_photo=False,
+                              enroll_stable=3, enroll_cooldown_ms=10000)
+    for t in (0, 0, 0):
+        s.update(t)  # 接続 + 1回目の結果(安定 1/3)
+    assert bus.learn_requests == 0 and s.view()[0] == "unknown"
+    s.update(1000)  # 安定 2/3
+    assert bus.learn_requests == 0
+    s.update(2000)  # 安定 3/3 -> 覚えさせる
+    assert bus.learn_requests == 1 and s.enrolled == 1 and s.new_id == 1
+    assert s.enroll_line() == "ENR ON 1"
+    s.update(3000)  # 覚えた顔は ID 1。5秒の間は「NEW」と出る
+    assert s.view()[:2] == ("NEW ID01", "red"), s.view()
+    s.update(8000)  # 5秒たつと、普通の表示(ID01)に戻る
+    assert s.view()[:2] == ("ID01", "red"), s.view()
+    assert bus.learn_requests == 1, "覚えた顔(ID 1)は、もう覚えさせない"
+
+
+def _stub_status(**kw):
+    class Cam:
+        def __init__(self):
+            self.n = 0
+
+        def learn(self, algo, timeout_ms=None):
+            self.n += 1
+            return self.n
+
+    s = hl_status.HuskyStatus(FakeBus(present=True), settle_ms=0, max_miss=1, auto_photo=False,
+                              enroll_stable=1, enroll_cooldown_ms=10000, **kw)
+    s.cam = Cam()
+    s.state, s.polled = hl_status.READY, True
+    return s
+
+
+def _face(s, id_=0, x=320, y=240, w=100, h=100, n=1):
+    s.faces, s.first, s.ids = n, _r(id_, "", w, h), [id_]
+    s.first["x"], s.first["y"] = x, y
+
+
+def test_enroll_conditions():
+    # 条件がそろえば覚えさせる(基準)
+    s = _stub_status()
+    _face(s)
+    s._maybe_enroll(0)
+    assert s.cam.n == 1
+    # 条件が1つでも欠けると、覚えさせない
+    for label, setup in (
+        ("顔が2つ", lambda s: _face(s, n=2)),
+        ("すでに覚えた顔(ID 1)", lambda s: _face(s, id_=1)),
+        ("顔が小さい", lambda s: _face(s, w=60, h=60)),
+        ("十字が枠の外(横)", lambda s: _face(s, x=500)),
+        ("十字が枠の外(縦)", lambda s: _face(s, y=400)),
+    ):
+        s = _stub_status()
+        setup(s)
+        s._maybe_enroll(0)
+        assert s.cam.n == 0, label
+    s = _stub_status()
+    _face(s)
+    s.toggle_enroll()
+    s._maybe_enroll(0)
+    assert s.cam.n == 0 and s.enroll_line() == "ENR OFF 0", "OFF のときは覚えさせない"
+
+
+def test_enroll_cooldown_and_cap():
+    s = _stub_status(enroll_max=2)
+    _face(s)
+    s._maybe_enroll(0)
+    assert s.cam.n == 1
+    s._maybe_enroll(5000)
+    assert s.cam.n == 1, "10秒たつまでは、次を覚えさせない"
+    s._maybe_enroll(10000)
+    assert s.cam.n == 2
+    s._maybe_enroll(30000)
+    assert s.cam.n == 2, "上限(2人)に達したので、覚えさせない"
+
+
+def test_enroll_needs_stable_face():
+    s = _stub_status()
+    s.enroll_stable = 3
+    _face(s)
+    s._maybe_enroll(0)
+    s._maybe_enroll(1000)
+    assert s.cam.n == 0
+    _face(s, n=2)  # 途中で、条件がくずれたら、数え直し
+    s._maybe_enroll(2000)
+    _face(s)
+    s._maybe_enroll(3000)
+    s._maybe_enroll(4000)
+    assert s.cam.n == 0, "また最初から3回数える"
+    s._maybe_enroll(5000)
+    assert s.cam.n == 1
+
+
+def test_enroll_failure_is_shown_and_waits():
+    bus = FakeBus(present=True)
+    bus.unknown_mode = True
+    bus.learn_fail = True
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, poll_ms=1000, auto_photo=False,
+                              enroll_stable=1, enroll_cooldown_ms=10000)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert bus.learn_requests == 1 and s.enrolled == 0 and s.enroll_line() == "ENR FAIL"
+    assert s.state == hl_status.READY, "覚えさせるのに失敗しても、接続は保つ"
+    s.update(1000)
+    assert bus.learn_requests == 1, "失敗しても、すぐには、やり直さない"
+
+
+# ---------- BOOT ボタン (短押し = 写真 / 長押し = 自動登録) ----------
+def test_boot_short_press_toggles_photo():
+    pattern = [1, 1, 0, 0, 0, 1]  # 3ループ(0.3秒)押す
+    fake = run_main(FakeBus(present=True), loops=60, boot_pattern=pattern)
+    assert last_text(fake, 107).startswith("PHOTO OFF"), last_text(fake, 107)
+    assert last_text(fake, 118) == "BLE: waiting... ENR ON 0", "短押しでは、自動登録は変わらない"
+
+
+def test_boot_long_press_toggles_enroll():
+    pattern = [1, 1] + [0] * 20 + [1]  # 20ループ(2秒)押す
+    fake = run_main(FakeBus(present=True), loops=60, boot_pattern=pattern)
+    assert last_text(fake, 118) == "BLE: waiting... ENR OFF 0", last_text(fake, 118)
+    assert last_text(fake, 107).startswith("PHOTO ON"), "長押しでは、写真は変わらない"
 
 
 def test_no_micropython_incompatible_calls():

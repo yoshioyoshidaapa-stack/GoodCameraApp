@@ -31,6 +31,13 @@ class FakeI2C:
         self.photo_requests = 0  # 写真を頼まれた回数
         self.drop_results = 0  # 結果の要求を、最初の何回か無視する（準備中・遅れの再現）
         self.result_requests = 0  # 結果を頼まれた回数
+        self.unknown_mode = False  # True なら、画面の中央に、知らない顔(ID 0)が1つだけ見えている
+        self.learned_id = 0  # 覚えさせたあとの、その顔の ID
+        self.next_id = 1
+        self.learn_requests = 0
+        self.learn_fail = False
+        self.last_block = None
+        self.forgot = False
 
     def writeto(self, addr, buf):
         assert addr == 0x50
@@ -70,8 +77,31 @@ class FakeI2C:
             else:
                 name = ("IMG_%04d.jpg" % self.photo_requests).encode()
                 self.out += frame(hl.CMD_RETURN_ARGS, 0, bytes([0, 0]) + bytes(12) + bytes([len(name)]) + name)
+        elif cmd == hl.CMD_ACTION_LEARN or cmd == hl.CMD_ACTION_LEARN_BLOCK:
+            if cmd == hl.CMD_ACTION_LEARN:
+                assert size == 0, size
+            else:
+                assert size == 14, size
+                self.last_block = struct.unpack_from("<hhhh", data, 2)
+            self.learn_requests += 1
+            if self.learn_fail:
+                new_id = 0
+            else:
+                new_id = self.next_id
+                self.next_id += 1
+                self.learned_id = new_id
+            self.out += frame(hl.CMD_RETURN_ARGS, 0, bytes([0, 0]) + struct.pack("<h", new_id) + bytes(10))
+        elif cmd == hl.CMD_ACTION_FORGET:
+            assert size == 0
+            self.forgot = True
+            self.learned_id = 0
+            self.out += frame(hl.CMD_RETURN_ARGS, 0, bytes([0, 0]) + bytes(12))
         elif cmd == hl.CMD_GET_RESULT and self._skip_result():
             return
+        elif cmd == hl.CMD_GET_RESULT and self.unknown_mode:
+            info = struct.pack("<BbhhhhI", self.learned_id, 0, 1, 1 if self.learned_id else 0, 1, 1, 0)[:14]
+            self.out += frame(hl.CMD_RETURN_INFO, algo, info)
+            self.out += frame(hl.CMD_RETURN_BLOCK, algo, result_data(self.learned_id, 320, 240, 100, 100, 0.9))
         elif cmd == hl.CMD_GET_RESULT and not self.faces_present:
             info = struct.pack("<BbhhhhI", 0, 0, 0, 0, 0, 0, 0)[:14]
             self.out += frame(hl.CMD_RETURN_INFO, algo, info)

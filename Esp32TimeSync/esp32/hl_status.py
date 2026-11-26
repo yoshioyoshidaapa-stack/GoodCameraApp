@@ -39,7 +39,7 @@ def person_label(r):
     name = r["name"]
     if name and name != "Face" and all(32 <= ord(c) < 127 for c in name):
         return name[:15]
-    return "ID %d" % r["id"]
+    return "ID%02d" % r["id"]
 
 
 def main_result(results):
@@ -54,7 +54,8 @@ def main_result(results):
 class HuskyStatus:
     def __init__(self, i2c, algo=None, scan_ms=3000, retry_ms=3000, poll_ms=1000,
                  settle_ms=2000, max_miss=5,
-                 auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1):
+                 auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1,
+                 auto_enroll=True, enroll_max=8, enroll_cooldown_ms=10000, enroll_stable=3):
         self.i2c = i2c
         self.state = NO_DRIVER if (hl is None or i2c is None) else NOT_FOUND
         self.algo = algo if algo is not None else (hl.ALGO_FACE_RECOGNITION if hl else 0)
@@ -78,6 +79,17 @@ class HuskyStatus:
         self.last_photo = ""  # 直近のファイル名
         self.photo_fail = False
         self._last_photo_ms = None
+        # 知らない顔(ID 0)が、画面の中央にじっといたら、自動で覚えさせる(ID01, ID02 … の順)
+        self.auto_enroll = auto_enroll
+        self.enroll_max = enroll_max  # 電源を入れてから、自動で覚えさせる人数の上限
+        self.enroll_cooldown_ms = enroll_cooldown_ms  # 次に覚えさせるまでの、最低の間隔
+        self.enroll_stable = enroll_stable  # 条件が、続けて何回(=何秒)そろったら覚えさせるか
+        self.enrolled = 0  # 電源を入れてから、自動で覚えさせた人数
+        self.new_id = 0  # 直前に付いた ID(数秒だけ「NEW ID」と表示する)
+        self.enroll_fail = False
+        self._new_until = 0
+        self._stable = 0
+        self._last_enroll_ms = None
         self.err = ""  # 直近のエラー（画面に出す）
         self.step = ""  # いま何をしているか（エラーの場所の手がかり）
         self._next = 0
@@ -145,6 +157,8 @@ class HuskyStatus:
                     self.faces = 0
                     self.ids = []
                     self.first = None
+                    self.new_id = 0
+                    self._stable = 0
                     self.miss = 0
             else:
                 self.miss = 0
@@ -152,8 +166,55 @@ class HuskyStatus:
                 self.faces = len(rs)
                 self.ids = [r["id"] for r in rs[:6]]
                 self.first = main_result(rs)
+                if self.new_id and ticks_diff(now, self._new_until) >= 0:
+                    self.new_id = 0
                 if self.faces > 0:
                     self._maybe_take_photo(now)
+                self._maybe_enroll(now)
+
+    def toggle_enroll(self):
+        """自動で覚えさせる機能の、入り切り。"""
+        self.auto_enroll = not self.auto_enroll
+        self._stable = 0
+        return self.auto_enroll
+
+    def _maybe_enroll(self, now):
+        r = self.first
+        # 覚えさせてよい顔: 見えているのが1人だけで、まだ覚えていない顔(ID 0)で、
+        # ある程度大きく、画面の中央の十字が、顔の枠の中にある(本体の Button-A と同じ条件)
+        ok = (self.auto_enroll and self.enrolled < self.enroll_max and self.faces == 1
+              and r is not None and r["id"] == 0 and r["w"] >= 80
+              and abs(r["x"] - 320) <= r["w"] // 2 and abs(r["y"] - 240) <= r["h"] // 2)
+        if not ok:
+            self._stable = 0
+            return
+        if self._last_enroll_ms is not None and ticks_diff(now, self._last_enroll_ms) < self.enroll_cooldown_ms:
+            return
+        self._stable += 1
+        if self._stable < self.enroll_stable:
+            return
+        self._stable = 0
+        self._last_enroll_ms = now  # 失敗しても、すぐには、やり直さない
+        self.step = "learn"
+        try:
+            new_id = self.cam.learn(self.algo, timeout_ms=3000)
+        except OSError:
+            new_id = 0
+        if new_id > 0:
+            self.enrolled += 1
+            self.new_id = new_id
+            self._new_until = now + 5000
+            self.enroll_fail = False
+        else:
+            self.enroll_fail = True
+
+    def enroll_line(self):
+        """画面の一番下に出す、自動登録の状態(12字まで)。"""
+        if self.state == NO_DRIVER:
+            return "ENR -"
+        if self.enroll_fail and self.auto_enroll:
+            return "ENR FAIL"
+        return "ENR %s %d" % ("ON" if self.auto_enroll else "OFF", self.enrolled)
 
     def toggle_photo(self):
         """写真を撮る機能の、入り切り。"""
@@ -197,6 +258,8 @@ class HuskyStatus:
         r = self.first
         ids = ",".join([str(i) for i in self.ids])
         extra = "n=%d ids=%s x%d y%d" % (self.faces, ids, r["x"], r["y"])
+        if self.new_id:
+            return ("NEW ID%02d" % self.new_id, id_color(self.new_id), extra[:30])
         return (person_label(r), id_color(r["id"]), extra[:30])
 
     def person_color(self):

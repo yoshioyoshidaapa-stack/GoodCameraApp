@@ -41,6 +41,9 @@ CMD_KNOCK = 0x00
 CMD_GET_RESULT = 0x01
 CMD_SET_ALGORITHM = 0x0A
 CMD_ACTION_TAKE_PHOTO = 0x20
+CMD_ACTION_LEARN = 0x22
+CMD_ACTION_FORGET = 0x23
+CMD_ACTION_LEARN_BLOCK = 0x2C
 CMD_RETURN_ARGS = 0x1A
 CMD_RETURN_INFO = 0x1B
 CMD_RETURN_BLOCK = 0x1C
@@ -191,6 +194,51 @@ class HuskyLens2:
             if frame is not None:
                 return _int8(frame[6]) == 0
         return False
+
+    def learn(self, algo, timeout_ms=None):
+        """いま画面の中央の十字の下にある顔を覚えさせる(本体の Button-A と同じ)。
+        付いた ID (1, 2, 3 …) を返す。失敗したら 0。
+        ※ 本物の HuskyLens2 では、まだ試していない。"""
+        return self._id_reply(self.build_packet(CMD_ACTION_LEARN, algo, b""), timeout_ms)
+
+    def learn_block(self, algo, x, y, w, h, timeout_ms=None):
+        """指定した位置・大きさの枠の中のものを覚えさせる。付いた ID を返す。失敗したら 0。
+        ※ x, y が「枠の中心」か「左上」かは、公式のコードから読み取れていない。"""
+        data = bytes([0, 0]) + struct.pack("<hhhh", x, y, w, h) + bytes(4)
+        return self._id_reply(self.build_packet(CMD_ACTION_LEARN_BLOCK, algo, data), timeout_ms)
+
+    def forget(self, algo, timeout_ms=None):
+        """覚えた ID を、すべて忘れさせる。成功すると True。"""
+        packet = self.build_packet(CMD_ACTION_FORGET, algo, b"")
+        old = self.timeout_ms
+        if timeout_ms is not None:
+            self.timeout_ms = timeout_ms
+        try:
+            for _ in range(self.retry):
+                self._write(packet)
+                frame = self._wait(CMD_RETURN_ARGS)
+                if frame is not None:
+                    return _int8(frame[6]) == 0
+        finally:
+            self.timeout_ms = old
+        return False
+
+    def _id_reply(self, packet, timeout_ms):
+        old = self.timeout_ms
+        if timeout_ms is not None:
+            self.timeout_ms = timeout_ms
+        try:
+            for _ in range(self.retry):
+                self._write(packet)
+                frame = self._wait(CMD_RETURN_ARGS)
+                if frame is not None:
+                    data = frame[5:-1]
+                    if len(data) < 4:
+                        return 0
+                    return struct.unpack_from("<h", data, 2)[0] & 0xFF  # 公式のコードも uint8 に切る
+        finally:
+            self.timeout_ms = old
+        return 0
 
     def take_photo(self, resolution=RESOLUTION_1280x720, timeout_ms=None):
         """写真を撮らせる。HuskyLens2 が保存したファイル名を返す。失敗したら空の文字列 ""。

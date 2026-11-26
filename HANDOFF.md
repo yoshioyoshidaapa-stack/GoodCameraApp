@@ -52,7 +52,7 @@
 - `HuskyLens2/`
   - `huskylens2.py` : 公式 Arduino 部品(DFRobot_HuskylensV2 の ProtocolV2.cpp / Result.h)を MicroPython に書き直した I2C 部品
     (knock / switch_algorithm / get_results / take_photo / learn / learn_block / forget)
-  - `test_huskylens2.py`(7件) / `test_display.py`(54件) : パソコンの Python で動かす試験(ニセの HuskyLens2・ニセの画面を相手にする)
+  - `test_huskylens2.py`(7件) / `test_display.py`(62件) : パソコンの Python で動かす試験(ニセの HuskyLens2・ニセの画面を相手にする)
   - 調査用: `hl_debug.py`(返事の生の数字) / `hl_debug2.py`(結果の返事) / `hl_demo.py` / `hl_line_check.py`(SDA/SCL の状態) /
     `hl_step.py`(命令を1つずつ) / `hl_photo_test.py` / `hl_poll_test.py` / `hl_knock_test.py` / `hl_knock_nowait.py`
   - `docs/wiring.png` / `wiring.svg` : 配線図、`docs/display_mock.png` : 画面の見本(近似)
@@ -63,7 +63,11 @@
 - 物体認識(80種類。algo=2)で、名前が `bird` の結果だけを数える。画面の左に、視野(640x480)の 1/4 の地図と、鳥の黄色い枠。右に、鳥の数・自信・位置・写真・見えた物の名前・BLE。
 - BOOT ボタンを4秒以上で、鳥 ⇔ 顔 のモード切り替え。モードは `mode.txt` に残る(なければ鳥)。鳥のときは、自動登録はしない。写真は、鳥が見えたら撮る。
 - 画面の見本: `HuskyLens2/docs/display_mock_bird.png`。確認用: `HuskyLens2/hl_object_debug.py`(結果をそのまま表示)。
-- 未確認: 結果の名前に、本当に `bird` と入るか。位置(x,y,幅,高さ)が出るか。小さく速い鳥を、見つけられるか。
+- **実機で確認**(`hl_object_debug.py`): 名前は name の欄に入る(content は空、ID は 0)。**HuskyLens2 の言語が日本語なので、名前が日本語(`鳥` `バス` `人` `犬` …)**。
+  → 鳥の判定は `bird` と `鳥` の両方(`TARGET_ALIASES`)。ESP32 の画面は ASCII のみなので、日本語は英語に直して出す(`ENGLISH_NAMES`、実機で見た8つだけ。他は `?`)。
+  位置は x,y(枠の中心),w,h が出る。自信は 0.33〜0.67 と低め。検出は途切れがちで、画面全体の「バス」「テレビ」などの誤検出もある。
+  → 途切れても、前の枠を2回(約2秒)灰色で残す(`hold_polls`)。残している間は写真を撮らない。
+- 未確認: 小さく速い鳥を、見つけられるか。誤検出を減らす設定(Detection Threshold を上げる)の効果。
   公式 Wiki: 物体認識は「同じ種類の中の違い(スズメかハトか)」は、見分けられない。物体分類(1000種類)は位置が出ない。自己学習分類は、位置が出るかが不明。
 
 ## 画面(顔認識のモード。240x135、時計は無し)
@@ -87,6 +91,8 @@
 5. 2秒待ってから、1秒おきに結果を読む。**5回続けて読めなければ**、つなぎ直す。
 
 ## 失敗と教訓
+- 鳥の判定を、英語の `bird` だけで作ったら、実機では、名前が日本語で返ってきて、ずっと x0 だった。**実機の返事を、見てから作る**べきだった(確認用の `hl_object_debug.py` で、すぐ分かった)。
+- 試験用の「ニセの機械」も、日本語の名前の長さを、文字数で数える不具合があった(実機は、バイト数)。
 - MicroPython には `bytearray.pop()` が無い。パソコンの試験は通っても、実機で AttributeError(knock のところで止まる)。
   → `test_display.py` に、MicroPython に無い書き方を検出する試験を追加。ただし、すべては拾えない。
 - 返事が想定と違う、または遅いとき、プログラムが止まる/つなぎ直しを繰り返す → エラー表示、待ち時間、連続失敗の回数で対応。

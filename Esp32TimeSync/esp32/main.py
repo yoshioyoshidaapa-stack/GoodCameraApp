@@ -58,6 +58,7 @@ _SERVICE = (
 GRAY = 0x4208  # 暗い灰色
 MAGENTA = 0xF81F
 ORANGE = 0xFD20
+HELD_GRAY = 0x8410  # 検出が途切れて、前の枠を残している間の、枠の色
 
 
 def uuid128_le(s):
@@ -263,7 +264,8 @@ def main():
         to_screen("map")
         boxes = husky.boxes
         shoot = husky.shoot_show
-        sig = (tuple([(b[0] // 8, b[1] // 8, b[2] // 8, b[3] // 8) for b in boxes]), shoot)
+        held = husky.holding  # 検出が途切れて、前の枠を残している間は、灰色で出す
+        sig = (tuple([(b[0] // 8, b[1] // 8, b[2] // 8, b[3] // 8) for b in boxes]), shoot, held)
         if cache.get("map") != sig:  # 鳥の位置が変わったときだけ、地図を描き直す
             cache["map"] = sig
             lcd.rect(MAP_X, MAP_Y, MAP_W, MAP_H, lcd.BLACK)
@@ -272,7 +274,7 @@ def main():
             lcd.rect(MAP_X, MAP_Y, 1, MAP_H, GRAY)
             lcd.rect(MAP_X + MAP_W - 1, MAP_Y, 1, MAP_H, GRAY)
             for b in boxes:
-                map_box(b[0], b[1], b[2], b[3], lcd.YELLOW)
+                map_box(b[0], b[1], b[2], b[3], HELD_GRAY if held else lcd.YELLOW)
             if shoot:  # 写真を撮っている間は「SHOOT」
                 lcd.text("SHOOT", 20, 56, lcd.WHITE, 3)
         n = husky.faces
@@ -284,7 +286,7 @@ def main():
             conf = "%d%%" % int(c * 100 if c <= 1 else c)
             pos = "x%d y%d" % (first["x"], first["y"])
         row("b_title", "BIRD", 8, lcd.CYAN, 2, 164, 76)
-        row("b_count", pad("x%d" % n, 3), 28, lcd.YELLOW if n else GRAY, 3, 164, 76)
+        row("b_count", pad("x%d" % n, 3), 28, lcd.YELLOW if (n and not held) else GRAY, 3, 164, 76)
         row("b_conf", pad(conf, 4), 56, lcd.WHITE, 2, 164, 76)
         row("b_pos", pad(pos, 9), 78, lcd.WHITE, 1, 164, 76)
         row("b_photo", pad("PH:%s %d" % ("ON" if husky.auto_photo else "OFF", husky.photos), 9), 90, lcd.YELLOW, 1, 164, 76)

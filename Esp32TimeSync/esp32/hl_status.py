@@ -67,10 +67,37 @@ def person_label(r):
     return "ID%02d" % r["id"]
 
 
+# 探す言葉の、別の書き方。HuskyLens2 の言語が日本語だと、名前が日本語で返ってくる(実機で確認: '鳥')。
+TARGET_ALIASES = {"bird": ("bird", "鳥")}
+
+# 日本語の名前 -> 画面に出す英語名。実機で、実際に返ってきたものだけ。ほかの日本語は、"?" と出す。
+# (ESP32 の画面は、英数字しか出せないため。)
+ENGLISH_NAMES = {
+    "鳥": "bird", "バス": "bus", "人": "person", "犬": "dog",
+    "カップ": "cup", "スプーン": "spoon", "テレビ": "tv", "本": "book",
+}
+
+
 def matches_target(r, target):
-    """結果 r の「名前」または「内容」に、探す言葉(例 bird)が入っているか。大文字・小文字は、区別しない。
-    (実機の返事で、どちらの欄に入るか、まだ確認できていないため、両方を調べる。)"""
-    return target in r["name"].lower() or target in r["content"].lower()
+    """結果 r の「名前」または「内容」に、探す言葉(例 bird / 日本語の 鳥)が入っているか。
+    大文字・小文字は、区別しない。"""
+    words = TARGET_ALIASES.get(target, (target,))
+    name = r["name"].lower()
+    content = r["content"].lower()
+    for w in words:
+        if w in name or w in content:
+            return True
+    return False
+
+
+def ascii_name(name):
+    """画面に出せる名前にする。英数字だけならそのまま、日本語は、知っているものだけ英語に、他は "?"。"""
+    if name in ENGLISH_NAMES:
+        return ENGLISH_NAMES[name]
+    for c in name:
+        if not 32 <= ord(c) < 127:
+            return "?"
+    return name
 
 
 def mode_settings(mode):
@@ -95,7 +122,8 @@ class HuskyStatus:
     def __init__(self, i2c, algo=None, target=None, scan_ms=3000, retry_ms=3000, poll_ms=1000,
                  settle_ms=2000, max_miss=5, knock_settle_ms=4000,
                  auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1,
-                 auto_enroll=True, enroll_max=8, enroll_cooldown_ms=10000, enroll_stable=3):
+                 auto_enroll=True, enroll_max=8, enroll_cooldown_ms=10000, enroll_stable=3,
+                 hold_polls=2):
         self.i2c = i2c
         self.state = NO_DRIVER if (hl is None or i2c is None) else NOT_FOUND
         self.algo = algo if algo is not None else (hl.ALGO_FACE_RECOGNITION if hl else 0)
@@ -112,7 +140,11 @@ class HuskyStatus:
         self.polled = False  # READY になってから、結果を、一度でも読めたか
         # target: 探す物の名前(例 "bird")。None なら、見えたものを、すべて数える(顔認識)。
         self.target = target.lower() if target else None
-        self.seen = ""  # 見えたものの名前(最大3つ。名前が読めているかの確認用)
+        self.seen = ""  # 見えたものの名前(最大3つ。英語に直したもの。名前が読めているかの確認用)
+        # 鳥などは、検出が途切れがち(実機で確認)。見えなくなっても、hold_polls 回(約2秒)は、前の枠を残す。
+        self.hold_polls = hold_polls
+        self.holding = False  # 前の枠を残している間は True(画面では、灰色で出す)
+        self._empty = 0
         self.boxes = []  # 探している物の枠 (x, y, 幅, 高さ, 自信) の一覧(最大8件)。座標は 640x480
         self.faces = 0  # 探している物の数(顔認識なら、顔の数)
         self.ids = []  # 見えている顔の ID の一覧(最大6件)
@@ -209,6 +241,8 @@ class HuskyStatus:
                     self.ids = []
                     self.boxes = []
                     self.first = None
+                    self.holding = False
+                    self._empty = 0
                     self.new_id = 0
                     self._stable = 0
                     self.miss = 0
@@ -218,21 +252,29 @@ class HuskyStatus:
                 self.polled = True
                 names = []
                 for r in rs:
-                    n = r["name"].strip() or r["content"].strip()  # 名前が空なら、内容を、確認用に出す
+                    n = ascii_name(r["name"].strip() or r["content"].strip())
                     if n and n not in names:
                         names.append(n)
                 self.seen = ",".join(names[:3])[:20]
                 if self.target:  # 探している物だけにする(例: bird)
                     rs = [r for r in rs if matches_target(r, self.target)]
-                self.boxes = [(r["x"], r["y"], r["w"], r["h"], r["conf"]) for r in rs[:8]]
-                self.faces = len(rs)
-                self.ids = [r["id"] for r in rs[:6]]
-                self.first = main_result(rs)
+                if self.target and not rs and self.boxes and self._empty < self.hold_polls:
+                    # 検出が、一瞬、途切れただけかもしれない。前の枠を、少しの間、残す。
+                    self._empty += 1
+                    self.holding = True
+                else:
+                    self._empty = 0
+                    self.holding = False
+                    self.boxes = [(r["x"], r["y"], r["w"], r["h"], r["conf"]) for r in rs[:8]]
+                    self.faces = len(rs)
+                    self.ids = [r["id"] for r in rs[:6]]
+                    self.first = main_result(rs)
                 if self.new_id and ticks_diff(now, self._new_until) >= 0:
                     self.new_id = 0
-                if self.faces > 0:
+                if self.faces > 0 and not self.holding:  # 本当に見えているときだけ、写真を撮る
                     self._maybe_take_photo(now)
-                self._maybe_enroll(now)
+                if not self.holding:
+                    self._maybe_enroll(now)
 
     def _switch(self, now):
         """顔認識に切り替える。
@@ -259,6 +301,8 @@ class HuskyStatus:
         self.boxes = []
         self.first = None
         self.seen = ""
+        self.holding = False
+        self._empty = 0
         self.new_id = 0
         self._stable = 0
         self.miss = 0

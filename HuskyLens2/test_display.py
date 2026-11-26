@@ -968,6 +968,76 @@ def test_bird_found_when_label_is_in_content():
     assert s.faces == 1 and s.seen == "bird", (s.faces, s.seen)
 
 
+# ---------- 日本語の名前(実機で確認: HuskyLens2 の言語が日本語だと、名前が日本語で返る) ----------
+BIRDS_JP = [("鳥", 0, 200, 120, 60, 50, 0.8), ("人", 0, 320, 240, 200, 400, 0.9), ("鳥", 0, 500, 300, 100, 80, 0.6)]
+
+
+def test_ascii_name():
+    assert hl_status.ascii_name("bird") == "bird"
+    assert hl_status.ascii_name("鳥") == "bird"
+    assert hl_status.ascii_name("バス") == "bus"
+    assert hl_status.ascii_name("人") == "person"
+    assert hl_status.ascii_name("未知の物") == "?", "知らない日本語は、画面に出せないので ?"
+    assert hl_status.ascii_name("") == ""
+
+
+def test_bird_japanese_name_is_found():
+    bus, s = _bird_status(BIRDS_JP)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.faces == 2, "日本語の「鳥」も、鳥として数える"
+    assert s.seen == "bird,person", s.seen
+    assert hl_status.matches_target({"name": "鳥", "content": ""}, "bird")
+    assert not hl_status.matches_target({"name": "人", "content": ""}, "bird")
+
+
+# ---------- 検出が途切れても、前の枠を、少しの間、残す ----------
+def test_boxes_are_held_for_a_few_polls():
+    bus, s = _bird_status([BIRDS_JP[0]], hold_polls=2)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.faces == 1 and not s.holding
+    bus.objects = []  # 鳥が見えなくなった
+    s.update(1000)
+    assert s.holding and s.faces == 1 and len(s.boxes) == 1, "1回目: 前の枠を残す"
+    s.update(2000)
+    assert s.holding and len(s.boxes) == 1, "2回目: まだ残す"
+    s.update(3000)
+    assert not s.holding and s.faces == 0 and s.boxes == [], "3回目: 消す"
+    bus.objects = [BIRDS_JP[0]]
+    s.update(4000)
+    assert s.faces == 1 and not s.holding, "また見えたら、すぐに、本物の枠に戻る"
+
+
+def test_no_photo_while_holding_old_boxes():
+    bus, s = _bird_status([BIRDS_JP[0]], hold_polls=2, auto_photo=True, photo_cooldown_ms=0)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert bus.photo_requests == 1
+    bus.objects = []
+    s.update(1000)
+    s.update(2000)
+    assert s.holding and bus.photo_requests == 1, "前の枠を、残しているだけの間は、写真を撮らない"
+
+
+def test_set_algo_clears_held_boxes():
+    bus, s = _bird_status([BIRDS_JP[0]], hold_polls=2)
+    for t in (0, 0, 0):
+        s.update(t)
+    bus.objects = []
+    s.update(1000)
+    assert s.holding
+    s.set_algo(hl.ALGO_FACE_RECOGNITION, None, 2000)
+    assert not s.holding and s.boxes == []
+
+
+def test_bird_screen_with_japanese_names():
+    bus, fake = _bird_run(BIRDS_JP)
+    check_layout(fake)
+    assert last_text_at(fake, 164, 28) == "x2"
+    assert last_text_at(fake, 164, 102) == "bird,pers", "日本語の名前は、英語に直して出す"
+
+
 def test_no_micropython_incompatible_calls():
     """パソコンの Python にはあるが、MicroPython には無い書き方を、基板に入れるファイルで使っていないか。"""
     import re

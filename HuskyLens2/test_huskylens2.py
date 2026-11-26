@@ -14,7 +14,8 @@ def frame(cmd, algo, data):
 def result_data(id_, x, y, w, h, conf, name="", content=""):
     d = struct.pack("<Bbhhhhf", id_, 0, x, y, w, h, conf)
     if name or content:
-        d += bytes([len(name)]) + name.encode() + bytes([len(content)]) + content.encode()
+        nb, cb = name.encode("utf-8"), content.encode("utf-8")  # 長さは、文字数ではなく、バイト数
+        d += bytes([len(nb)]) + nb + bytes([len(cb)]) + cb
     return d
 
 

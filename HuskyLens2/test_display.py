@@ -45,7 +45,7 @@ class FakeBus(FakeI2C):
 # ---------- 状態の進み方 ----------
 def test_state_flow_ready():
     bus = FakeBus(present=True)
-    s = hl_status.HuskyStatus(bus)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1)
     assert s.state == hl_status.NOT_FOUND
     s.update(0)
     assert s.state == hl_status.FOUND
@@ -60,7 +60,7 @@ def test_state_flow_ready():
 
 def test_not_found_and_rescan():
     bus = FakeBus(present=False)
-    s = hl_status.HuskyStatus(bus, scan_ms=3000)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, scan_ms=3000)
     s.update(0)
     assert s.state == hl_status.NOT_FOUND
     assert s.view() == ("not found", "red", "check wiring / power")
@@ -74,7 +74,7 @@ def test_not_found_and_rescan():
 
 def test_lost_connection_goes_back():
     bus = FakeBus(present=True)
-    s = hl_status.HuskyStatus(bus, poll_ms=1000, retry_ms=3000)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, poll_ms=1000, retry_ms=3000)
     for t in (0, 0, 0):
         s.update(t)
     assert s.state == hl_status.READY
@@ -255,7 +255,7 @@ def test_every_row_has_fixed_width():
 def test_unexpected_error_does_not_stop():
     """HuskyLens2 の返事が想定外で IndexError などが起きても、止まらずに、エラーを表示する。"""
     bus = FakeBus(present=True)
-    s = hl_status.HuskyStatus(bus)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1)
     s.update(0)
     assert s.state == hl_status.FOUND
 
@@ -279,7 +279,7 @@ def test_unexpected_error_does_not_stop():
 
 def test_knock_returning_false_shows_reason():
     bus = FakeBus(present=True)
-    s = hl_status.HuskyStatus(bus)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1)
     s.update(0)
     s.cam.knock = lambda: False
     s.update(0)
@@ -299,7 +299,7 @@ def test_main_person_is_the_biggest_face():
 
 def test_person_color_bar():
     bus = FakeBus(present=True)
-    s = hl_status.HuskyStatus(bus, auto_photo=False)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, auto_photo=False)
     assert s.person_color() == "gray"  # つながる前
     for t in (0, 0, 0):
         s.update(t)
@@ -322,7 +322,7 @@ def test_take_photo_returns_file_name():
 
 def test_auto_photo_cooldown_and_cap():
     bus = FakeBus(present=True)
-    s = hl_status.HuskyStatus(bus, poll_ms=1000, photo_cooldown_ms=10000, photo_max=2)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, poll_ms=1000, photo_cooldown_ms=10000, photo_max=2)
     for t in (0, 0, 0):
         s.update(t)  # つながって、最初の結果で、1枚目
     assert bus.photo_requests == 1 and s.photos == 1 and s.last_photo == "IMG_0001.jpg"
@@ -339,7 +339,7 @@ def test_auto_photo_cooldown_and_cap():
 def test_no_photo_without_face_or_when_off():
     bus = FakeBus(present=True)
     bus.faces_present = False
-    s = hl_status.HuskyStatus(bus, poll_ms=1000, photo_cooldown_ms=0)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, poll_ms=1000, photo_cooldown_ms=0)
     for t in (0, 0, 0, 1000, 2000):
         s.update(t)
     assert bus.photo_requests == 0, "顔がいないときは撮らない"
@@ -356,7 +356,7 @@ def test_no_photo_without_face_or_when_off():
 def test_photo_failure_keeps_connection():
     bus = FakeBus(present=True)
     bus.photo_fail = True
-    s = hl_status.HuskyStatus(bus, poll_ms=1000, photo_cooldown_ms=10000)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, poll_ms=1000, photo_cooldown_ms=10000)
     for t in (0, 0, 0):
         s.update(t)
     assert s.state == hl_status.READY, "写真に失敗しても、接続は保つ"
@@ -365,6 +365,47 @@ def test_photo_failure_keeps_connection():
     # 失敗しても、すぐには撮り直さない
     s.update(1000)
     assert bus.photo_requests == 1
+
+
+# ---------- 「準備中」と「返事の遅れ」への強さ ----------
+def test_waits_for_settle_before_first_poll():
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus, settle_ms=2000, auto_photo=False)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.state == hl_status.READY
+    assert s.view() == ("starting", "yellow", "waiting for HuskyLens2")
+    s.update(1000)
+    assert bus.result_requests == 0, "準備待ちの間は、結果を取りにいかない"
+    s.update(2000)
+    assert bus.result_requests == 1 and s.polled
+    assert s.view()[0] == "faces:3"
+
+
+def test_a_few_missed_replies_do_not_drop_connection():
+    bus = FakeBus(present=True)
+    bus.drop_results = 2  # 最初の2回は、返事が来ない
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=5, poll_ms=1000, auto_photo=False)
+    for t in (0, 0, 0):
+        s.update(t)  # READY になり、1回目の結果の要求(返事なし)
+    assert s.state == hl_status.READY and s.miss == 1
+    assert s.view() == ("no reply", "yellow", "miss 1/5")
+    assert s.person_color() == "gray"
+    s.update(1000)
+    assert s.state == hl_status.READY and s.miss == 2
+    s.update(2000)  # 3回目で返事が来る
+    assert s.state == hl_status.READY and s.miss == 0 and s.faces == 3
+    assert s.view()[0] == "faces:3"
+
+
+def test_many_missed_replies_reconnect():
+    bus = FakeBus(present=True)
+    bus.drop_results = 99
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=3, poll_ms=1000, auto_photo=False)
+    for t in (0, 0, 0, 1000, 2000):
+        s.update(t)
+    assert s.state == hl_status.NOT_FOUND and s.err == "result failed", (s.state, s.err)
+    assert s.miss == 0
 
 
 def test_no_micropython_incompatible_calls():

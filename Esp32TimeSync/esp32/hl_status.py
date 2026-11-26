@@ -41,6 +41,7 @@ def main_result(results):
 
 class HuskyStatus:
     def __init__(self, i2c, algo=None, scan_ms=3000, retry_ms=3000, poll_ms=1000,
+                 settle_ms=2000, max_miss=5,
                  auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1):
         self.i2c = i2c
         self.state = NO_DRIVER if (hl is None or i2c is None) else NOT_FOUND
@@ -48,6 +49,11 @@ class HuskyStatus:
         self.scan_ms = scan_ms
         self.retry_ms = retry_ms
         self.poll_ms = poll_ms
+        # 顔認識に切り替えた直後は、HuskyLens2 の準備を待つ。返事が少し遅れても、すぐには切らない。
+        self.settle_ms = settle_ms
+        self.max_miss = max_miss
+        self.miss = 0  # 結果を読めなかった、連続の回数
+        self.polled = False  # READY になってから、結果を、一度でも読めたか
         self.faces = 0
         self.first = None  # 最初の結果 (辞書)
         # 顔が見えたら写真を撮る(撮りすぎないよう、間隔と上限を決めてある)
@@ -63,7 +69,7 @@ class HuskyStatus:
         self.step = ""  # いま何をしているか（エラーの場所の手がかり）
         self._next = 0
         # 時計を止めないよう、待ち時間は短くする
-        self.cam = hl.HuskyLens2(i2c, timeout_ms=300, retry=1) if self.state != NO_DRIVER else None
+        self.cam = hl.HuskyLens2(i2c, timeout_ms=600, retry=1) if self.state != NO_DRIVER else None
 
     def update(self, now):
         """1回呼ぶごとに、必要な分だけ状態を進める。now は ticks_ms() の値。
@@ -103,7 +109,9 @@ class HuskyStatus:
             if ok:
                 self.state = READY
                 self.err = ""
-                self._next = now
+                self.miss = 0
+                self.polled = False
+                self._next = now + self.settle_ms  # 準備ができるまで、少し待ってから、結果を読む
             else:
                 self.err = (self.step + " failed")[:30]
                 self.state = NOT_FOUND
@@ -116,12 +124,17 @@ class HuskyStatus:
             except OSError:
                 rs = None
             if rs is None:
-                self.err = "result failed"
-                self.state = NOT_FOUND
-                self._next = now + self.retry_ms
-                self.faces = 0
-                self.first = None
+                self.miss += 1
+                if self.miss >= self.max_miss:  # 何回も続けて読めなければ、つなぎ直す
+                    self.err = "result failed"
+                    self.state = NOT_FOUND
+                    self._next = now + self.retry_ms
+                    self.faces = 0
+                    self.first = None
+                    self.miss = 0
             else:
+                self.miss = 0
+                self.polled = True
                 self.faces = len(rs)
                 self.first = main_result(rs)
                 if self.faces > 0:
@@ -160,6 +173,10 @@ class HuskyStatus:
             return ("not found", "red", "check wiring / power")
         if self.state == FOUND:
             return ("connecting", "yellow", "0x50 found")
+        if self.miss > 0:
+            return ("no reply", "yellow", "miss %d/%d" % (self.miss, self.max_miss))
+        if not self.polled:
+            return ("starting", "yellow", "waiting for HuskyLens2")
         if self.first is None:
             return ("faces:0", "green", "no face")
         r = self.first
@@ -173,7 +190,7 @@ class HuskyStatus:
 
     def person_color(self):
         """画面の色の帯に使う色の名前。顔がなければ "gray"。"""
-        if self.state != READY or self.first is None:
+        if self.state != READY or self.first is None or self.miss > 0 or not self.polled:
             return "gray"
         return id_color(self.first["id"])
 

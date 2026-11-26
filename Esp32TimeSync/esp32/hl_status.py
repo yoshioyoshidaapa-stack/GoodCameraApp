@@ -67,6 +67,12 @@ def person_label(r):
     return "ID%02d" % r["id"]
 
 
+def matches_target(r, target):
+    """結果 r の「名前」または「内容」に、探す言葉(例 bird)が入っているか。大文字・小文字は、区別しない。
+    (実機の返事で、どちらの欄に入るか、まだ確認できていないため、両方を調べる。)"""
+    return target in r["name"].lower() or target in r["content"].lower()
+
+
 def mode_settings(mode):
     """画面のモード -> (認識の種類, 探す名前)。 face = 顔認識 / bird = 物体認識で、名前が bird のものだけ。"""
     if hl is None:
@@ -212,12 +218,12 @@ class HuskyStatus:
                 self.polled = True
                 names = []
                 for r in rs:
-                    n = r["name"].strip()
+                    n = r["name"].strip() or r["content"].strip()  # 名前が空なら、内容を、確認用に出す
                     if n and n not in names:
                         names.append(n)
                 self.seen = ",".join(names[:3])[:20]
-                if self.target:  # 探している名前の物だけにする(例: bird)
-                    rs = [r for r in rs if r["name"].strip().lower() == self.target]
+                if self.target:  # 探している物だけにする(例: bird)
+                    rs = [r for r in rs if matches_target(r, self.target)]
                 self.boxes = [(r["x"], r["y"], r["w"], r["h"], r["conf"]) for r in rs[:8]]
                 self.faces = len(rs)
                 self.ids = [r["id"] for r in rs[:6]]

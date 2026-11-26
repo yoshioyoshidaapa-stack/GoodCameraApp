@@ -936,6 +936,38 @@ def test_boot_between_1_5_and_4_seconds_does_not_switch_mode():
     assert fake.mode_file == "face"
 
 
+def test_bird_match_by_name_or_content_and_case():
+    """実機の返事で、鳥の名前が、どの欄に、どんな書き方で入るか、まだ分からない。ゆるく調べる。"""
+    mk = lambda name, content="": {"name": name, "content": content}
+    assert hl_status.matches_target(mk("bird"), "bird")
+    assert hl_status.matches_target(mk("Bird"), "bird"), "大文字でも"
+    assert hl_status.matches_target(mk("bird:ID1"), "bird"), "前後に文字が付いても"
+    assert hl_status.matches_target(mk("", "bird"), "bird"), "名前が空で、内容に入っていても"
+    assert hl_status.matches_target(mk("Object", "BIRD"), "bird")
+    assert not hl_status.matches_target(mk("person"), "bird")
+    assert not hl_status.matches_target(mk("", ""), "bird")
+
+
+def test_bird_found_when_label_is_in_content():
+    bus = FakeBus(present=True)
+    # 名前の欄が空で、内容の欄に bird と入っている返事(実機が、そうだった場合の想定)
+    bus.objects = [("", 0, 300, 200, 80, 60, 0.7)]
+    import test_huskylens2 as th
+    orig = th.result_data
+
+    def patched(id_, x, y, w, h, conf, name="", content=""):
+        return orig(id_, x, y, w, h, conf, "", "bird")
+
+    th.result_data = patched
+    try:
+        s = hl_status.HuskyStatus(bus, target="bird", settle_ms=0, knock_settle_ms=0, max_miss=1, auto_photo=False)
+        for t in (0, 0, 0):
+            s.update(t)
+    finally:
+        th.result_data = orig
+    assert s.faces == 1 and s.seen == "bird", (s.faces, s.seen)
+
+
 def test_no_micropython_incompatible_calls():
     """パソコンの Python にはあるが、MicroPython には無い書き方を、基板に入れるファイルで使っていないか。"""
     import re

@@ -158,7 +158,7 @@ class HuskyStatus:
         elif self.state == FOUND:
             self.step = "knock"
             try:
-                ok = self.cam.knock()
+                ok = self.cam.knock(timeout_ms=1500)  # メニューに戻った直後は、返事が遅れることがある
             except OSError:
                 ok = False
             if not ok:
@@ -194,6 +194,7 @@ class HuskyStatus:
                     self.miss = 0
             else:
                 self.miss = 0
+                self.err = ""
                 self.polled = True
                 self.faces = len(rs)
                 self.ids = [r["id"] for r in rs[:6]]
@@ -205,22 +206,20 @@ class HuskyStatus:
                 self._maybe_enroll(now)
 
     def _switch(self, now):
-        """顔認識に切り替える。成功したら READY(少し待ってから、結果を読み始める)。"""
+        """顔認識に切り替える。
+        切り替えは、モデルの読み込みで時間がかかるので、返事を長めに待つ(3秒)。
+        返事が届かなくても、切り替えは、成功していることがある(映像は出る)ので、すぐには、つなぎ直さない。
+        そのまま READY に進み、結果が読めるかで、判断する(5回続けて読めなければ、つなぎ直す)。"""
         self.step = "algo"
         try:
-            ok = self.cam.switch_algorithm(self.algo)
+            ok = self.cam.switch_algorithm(self.algo, timeout_ms=3000)
         except OSError:
             ok = False
-        if ok:
-            self.state = READY
-            self.err = ""
-            self.miss = 0
-            self.polled = False
-            self._next = now + self.settle_ms  # 準備ができるまで、少し待ってから、結果を読む
-        else:
-            self.err = "algo failed"
-            self.state = NOT_FOUND
-            self._next = now + self.retry_ms
+        self.state = READY
+        self.err = "" if ok else "algo?"  # 返事が届かなかった(結果が読めれば、気にしなくてよい)
+        self.miss = 0
+        self.polled = False
+        self._next = now + self.settle_ms  # 準備ができるまで、少し待ってから、結果を読む
 
     def toggle_enroll(self):
         """自動で覚えさせる機能の、入り切り。"""
@@ -310,7 +309,7 @@ class HuskyStatus:
         if self.miss > 0:
             return ("no reply", "yellow", "miss %d/%d" % (self.miss, self.max_miss))
         if not self.polled:
-            return ("starting", "yellow", "waiting for HuskyLens2")
+            return ("starting", "yellow", self.err or "waiting for HuskyLens2")
         if self.first is None:
             return ("no face", "white", "n=0")
         r = self.first

@@ -283,7 +283,7 @@ def test_unexpected_error_does_not_stop():
     s.update(0)
     assert s.state == hl_status.FOUND
 
-    def boom():
+    def boom(timeout_ms=None):
         raise IndexError("short frame")
 
     s.cam.knock = boom
@@ -293,8 +293,8 @@ def test_unexpected_error_does_not_stop():
     detail, color, extra = s.view()
     assert detail == "not found" and extra == "knock:IndexError", (detail, extra)
     # 直ったら、再接続でき、エラー表示は消える
-    s.cam.knock = lambda: True
-    s.cam.switch_algorithm = lambda a: True
+    s.cam.knock = lambda timeout_ms=None: True
+    s.cam.switch_algorithm = lambda a, timeout_ms=None: True
     s.update(3000)
     assert s.state == hl_status.FOUND
     s.update(3000)
@@ -305,7 +305,7 @@ def test_knock_returning_false_shows_reason():
     bus = FakeBus(present=True)
     s = hl_status.HuskyStatus(bus, settle_ms=0, knock_settle_ms=0, max_miss=1)
     s.update(0)
-    s.cam.knock = lambda: False
+    s.cam.knock = lambda timeout_ms=None: False
     s.update(0)
     assert s.state == hl_status.NOT_FOUND and s.err == "knock failed", s.err
 
@@ -724,8 +724,8 @@ def test_waits_after_knock_before_switching():
     s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, knock_settle_ms=4000, auto_photo=False, auto_enroll=False)
     calls = []
     real_knock, real_switch = s.cam.knock, s.cam.switch_algorithm
-    s.cam.knock = lambda: calls.append("knock") or real_knock()
-    s.cam.switch_algorithm = lambda a: calls.append("switch") or real_switch(a)
+    s.cam.knock = lambda timeout_ms=None: calls.append("knock") or real_knock(timeout_ms=timeout_ms)
+    s.cam.switch_algorithm = lambda a, timeout_ms=None: calls.append("switch") or real_switch(a, timeout_ms=timeout_ms)
     s.update(0)   # 0x50 が見つかる
     assert s.state == hl_status.FOUND
     s.update(0)   # knock
@@ -738,14 +738,35 @@ def test_waits_after_knock_before_switching():
     assert calls == ["knock", "switch"] and s.state == hl_status.READY
 
 
-def test_switch_failure_after_knock_goes_back():
+def test_slow_switch_reply_does_not_cause_reconnect_loop():
+    """切り替えの返事が届かなくても、すぐには、つなぎ直さない。結果が読めれば、そのまま使う。"""
     bus = FakeBus(present=True)
-    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, knock_settle_ms=1000, auto_photo=False, auto_enroll=False)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, knock_settle_ms=1000, max_miss=5, auto_photo=False, auto_enroll=False)
     s.update(0)
     s.update(0)
-    s.cam.switch_algorithm = lambda a: False
+    seen = {}
+    s.cam.switch_algorithm = lambda a, timeout_ms=None: seen.setdefault("timeout", timeout_ms) and False
     s.update(1000)
-    assert s.state == hl_status.NOT_FOUND and s.err == "algo failed", (s.state, s.err)
+    assert seen["timeout"] == 3000, "切り替えの返事は、3秒まで待つ"
+    assert s.state == hl_status.READY and s.err == "algo?", (s.state, s.err)
+    assert s.view() == ("starting", "yellow", "algo?")
+    s.update(1000)  # 結果が読める
+    assert s.state == hl_status.READY and s.polled and s.err == "" and s.view()[0] == "Taro"
+
+
+def test_unreadable_results_after_failed_switch_reconnect():
+    bus = FakeBus(present=True)
+    bus.drop_results = 99
+    s = hl_status.HuskyStatus(bus, settle_ms=0, knock_settle_ms=0, max_miss=2, poll_ms=1000, auto_photo=False, auto_enroll=False)
+    s.update(0)
+    s.update(0)
+    s.cam.switch_algorithm = lambda a, timeout_ms=None: False
+    s.state, s._next = hl_status.KNOCKED, 0
+    s.update(0)  # 切り替えの返事なし -> READY
+    assert s.state == hl_status.READY
+    s.update(1000)
+    s.update(2000)  # 結果が2回続けて読めない -> つなぎ直す
+    assert s.state == hl_status.NOT_FOUND and s.err == "result failed", (s.state, s.err)
 
 
 def test_no_micropython_incompatible_calls():

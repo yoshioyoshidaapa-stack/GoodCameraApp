@@ -174,25 +174,32 @@ class HuskyLens2:
         return None
 
     # ---- 命令 ----
-    def knock(self):
-        """つながっているかの確認。成功すると True。"""
+    def knock(self, timeout_ms=None):
+        """つながっているかの確認。成功すると True。timeout_ms で、返事を待つ時間を、指定できる。"""
         packet = self.build_packet(CMD_KNOCK, ALGO_ANY, bytes([_BOARD_LARGE_RAM]) + bytes(13))
-        for _ in range(self.retry):
-            self._write(packet)
-            sleep_ms(10)
-            frame = self._wait(CMD_RETURN_ARGS)
-            if frame is not None:
-                return _int8(frame[6]) == 0
-        return False
+        return self._ack(packet, timeout_ms, pause_ms=10)
 
-    def switch_algorithm(self, algo):
-        """認識の種類を切り替える。成功すると True。"""
+    def switch_algorithm(self, algo, timeout_ms=None):
+        """認識の種類を切り替える。成功すると True。
+        切り替えは、モデルの読み込みで、時間がかかることがある。timeout_ms で、返事を待つ時間を、長くできる。"""
         packet = self.build_packet(CMD_SET_ALGORITHM, ALGO_ANY, bytes([algo]) + bytes(13))
-        for _ in range(self.retry):
-            self._write(packet)
-            frame = self._wait(CMD_RETURN_ARGS)
-            if frame is not None:
-                return _int8(frame[6]) == 0
+        return self._ack(packet, timeout_ms)
+
+    def _ack(self, packet, timeout_ms, pause_ms=0):
+        """命令を送って、「返事の戻り値が 0」なら True。返事がなければ False。"""
+        old = self.timeout_ms
+        if timeout_ms is not None:
+            self.timeout_ms = timeout_ms
+        try:
+            for _ in range(self.retry):
+                self._write(packet)
+                if pause_ms:
+                    sleep_ms(pause_ms)
+                frame = self._wait(CMD_RETURN_ARGS)
+                if frame is not None:
+                    return _int8(frame[6]) == 0
+        finally:
+            self.timeout_ms = old
         return False
 
     def learn(self, algo, timeout_ms=None):

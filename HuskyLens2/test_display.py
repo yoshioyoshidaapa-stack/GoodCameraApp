@@ -34,6 +34,9 @@ class FakeBus(FakeI2C):
     def writeto(self, addr, buf):
         if not self.present:
             raise OSError("ENODEV")
+        if len(buf) > 2 and buf[2] == hl.CMD_ACTION_TAKE_PHOTO and getattr(self, "fake_lcd", None) is not None:
+            # 写真の要求が来た時点で、画面に「SHOOT」が、すでに描かれていたか
+            self.shoot_before_photo = any(t[0].strip() == "SHOOT" for t in self.fake_lcd.texts)
         FakeI2C.writeto(self, addr, buf)
 
     def readfrom(self, addr, n):
@@ -98,6 +101,7 @@ class FakeLcd(types.ModuleType):
         types.ModuleType.__init__(self, "lcd")
         self.texts = []
         self.rects = []
+        self.events = []  # 描いた順の記録 (見本の画像を作るために使う)
 
     def init(self):
         pass
@@ -107,18 +111,21 @@ class FakeLcd(types.ModuleType):
 
     def rect(self, x, y, w, h, color):
         self.rects.append((x, y, w, h))
+        self.events.append(("rect", x, y, w, h, color))
 
     def text(self, s, x, y, color=0xFFFF, scale=2, bg=0):
         self.texts.append((s, x, y, color, scale))
+        self.events.append(("text", s, x, y, color, scale))
 
 
 class _Stop(Exception):
     pass
 
 
-def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None):
+def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, frame_ends=None):
     """main.py を、ニセの部品で、loops 回だけ動かして、描いた内容を返す。"""
     fake_lcd = FakeLcd()
+    bus.fake_lcd = fake_lcd
 
     class FakeBLE:
         def active(self, v):
@@ -175,6 +182,8 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None):
     time.ticks_diff = lambda a, b: a - b
 
     def fake_sleep(ms):
+        if frame_ends is not None:
+            frame_ends.append(len(fake_lcd.events))  # 1ループ(=1画面)が描き終わった位置
         state["n"] += 1
         state["off"] += ms
         if state["n"] >= loops:
@@ -208,12 +217,14 @@ def check_layout(fake_lcd):
         assert x >= 0 and y >= 0, (s, x, y)
         assert x + w <= 240, "横にはみ出し: %r x=%d w=%d" % (s, x, w)
         assert y + h <= 135, "縦にはみ出し: %r y=%d h=%d" % (s, y, h)
-        ranges[y] = (y, y + h)
-    ys = sorted(ranges.values())
+        ranges[y] = max(ranges.get(y, 0), y + h)
+    ys = sorted(ranges.items())
     for (a0, a1), (b0, b1) in zip(ys, ys[1:]):
-        assert a1 <= b0, "行が重なっている: %r と %r" % ((a0, a1), (b0, b1))
+        assert a1 <= b0, "行が重なっている: y=%d..%d と y=%d" % (a0, a1, b0)
     for x, y, w, h in fake_lcd.rects:
         assert x + w <= 240 and y + h <= 135, ("線がはみ出し", x, y, w, h)
+    # 大きい文字の行(y=2)と、色の帯(y=40)も、重ならない
+    assert ranges.get(2, 0) <= 40, "大きい文字が、色の帯に、かかっている"
 
 
 def last_text(fake_lcd, y):
@@ -224,36 +235,42 @@ def last_text(fake_lcd, y):
 def test_layout_husky_absent():
     fake = run_main(FakeBus(present=False), loops=40)
     check_layout(fake)
-    assert last_text(fake, 4) == "--:--:--"
-    assert last_text(fake, 34) == "NO SYNC"
-    assert last_text(fake, 76) == "not found"
-    assert last_text(fake, 118) == "BLE: waiting... ENR ON 0", last_text(fake, 118)
-
+    assert last_text(fake, 2) == "not found"
+    assert last_text(fake, 52) == "", "顔がないときは、顔の数の行は、空"
+    assert last_text(fake, 72) == "PHOTO ON 0"
+    assert last_text(fake, 92) == "ENR ON 0"
+    assert last_text(fake, 110) == "check wiring / power"
+    assert last_text(fake, 122) == "BLE: waiting..."
+    assert not any(t[2] == 4 for t in fake.texts), "時計(時刻)は、もう出さない"
 
 def test_layout_husky_ready():
-    fake = run_main(FakeBus(present=True), loops=60)
+    bus = FakeBus(present=True)
+    fake = run_main(bus, loops=60)
     check_layout(fake)
-    assert last_text(fake, 76) == "Taro", last_text(fake, 76)
-    assert last_text(fake, 96) == "n=3 ids=1,2,3 x320 y240", last_text(fake, 96)
-    assert last_text(fake, 107) == "PHOTO ON 1 IMG_0001.jpg", last_text(fake, 107)
+    labels = [t for t in fake.texts if t[2] == 2]
+    assert labels[-1][0].rstrip() == "Taro" and labels[-1][4] == 4, labels[-1]  # 短い名前は、4倍の大きい文字
+    assert last_text(fake, 52) == "n=3 ids=1,2,3", last_text(fake, 52)
+    assert last_text(fake, 72) == "PHOTO ON 1", last_text(fake, 72)
+    assert last_text(fake, 110) == "n=3 ids=1,2,3 x320 y240", last_text(fake, 110)
+    # 写真を撮ったとき: 「SHOOT」が出て、その時点は、写真の要求より前だった
+    assert any(t[0].strip() == "SHOOT" and t[4] == 4 for t in labels), "SHOOT が出ていない"
+    assert bus.shoot_before_photo is True, "写真を頼む前に、SHOOT を描いていない"
+    assert labels[-1][0].strip() != "SHOOT", "撮影のあとは、人の表示に戻る"
 
-
-def test_clock_runs_without_hl_status():
+def test_runs_without_hl_status():
     fake = run_main(FakeBus(present=False), loops=10, with_hl_status=False)
     check_layout(fake)
-    assert last_text(fake, 76) == "no driver"
-    assert last_text(fake, 4) == "--:--:--"
-
+    assert last_text(fake, 2) == "no driver"
+    assert last_text(fake, 110) == "hl_status.py missing"
 
 def test_every_row_has_fixed_width():
-    """前の文字が残らないよう、同じ行は、いつも同じ長さで描いている。"""
+    """前の文字が残らないよう、同じ行・同じ倍率の文字は、いつも同じ長さで描いている。"""
     fake = run_main(FakeBus(present=True), loops=60)
     widths = {}
     for s, x, y, col, scale in fake.texts:
-        widths.setdefault(y, set()).add(len(s))
-    for y, ws in widths.items():
-        assert len(ws) == 1, "y=%d の行の文字数がばらばら: %r" % (y, ws)
-
+        widths.setdefault((y, scale), set()).add(len(s))
+    for key, ws in widths.items():
+        assert len(ws) == 1, "y=%d 倍率%d の行の文字数がばらばら: %r" % (key[0], key[1], ws)
 
 def test_unexpected_error_does_not_stop():
     """HuskyLens2 の返事が想定外で IndexError などが起きても、止まらずに、エラーを表示する。"""
@@ -468,8 +485,10 @@ def test_auto_enroll_after_stable_seconds():
     s.update(2000)  # 安定 3/3 -> 覚えさせる
     assert bus.learn_requests == 1 and s.enrolled == 1 and s.new_id == 1
     assert s.enroll_line() == "ENR ON 1"
+    assert s.person_color() == "red", "NEW ID の間も、色の帯は、新しい ID(赤)にそろえる"
     s.update(3000)  # 覚えた顔は ID 1。5秒の間は「NEW」と出る
     assert s.view()[:2] == ("NEW ID01", "red"), s.view()
+    assert s.person_color() == "red"
     s.update(8000)  # 5秒たつと、普通の表示(ID01)に戻る
     assert s.view()[:2] == ("ID01", "red"), s.view()
     assert bus.learn_requests == 1, "覚えた顔(ID 1)は、もう覚えさせない"
@@ -569,15 +588,61 @@ def test_enroll_failure_is_shown_and_waits():
 def test_boot_short_press_toggles_photo():
     pattern = [1, 1, 0, 0, 0, 1]  # 3ループ(0.3秒)押す
     fake = run_main(FakeBus(present=True), loops=60, boot_pattern=pattern)
-    assert last_text(fake, 107).startswith("PHOTO OFF"), last_text(fake, 107)
-    assert last_text(fake, 118) == "BLE: waiting... ENR ON 0", "短押しでは、自動登録は変わらない"
+    assert last_text(fake, 72).startswith("PHOTO OFF"), last_text(fake, 72)
+    assert last_text(fake, 92) == "ENR ON 0", "短押しでは、自動登録は変わらない"
 
 
 def test_boot_long_press_toggles_enroll():
     pattern = [1, 1] + [0] * 20 + [1]  # 20ループ(2秒)押す
     fake = run_main(FakeBus(present=True), loops=60, boot_pattern=pattern)
-    assert last_text(fake, 118) == "BLE: waiting... ENR OFF 0", last_text(fake, 118)
-    assert last_text(fake, 107).startswith("PHOTO ON"), "長押しでは、写真は変わらない"
+    assert last_text(fake, 92) == "ENR OFF 0", last_text(fake, 92)
+    assert last_text(fake, 72).startswith("PHOTO ON"), "長押しでは、写真は変わらない"
+
+
+# ---------- 「SHOOT」の仕組みと、大きい表示のための部品 ----------
+def test_shoot_callback_runs_before_capture():
+    bus = FakeBus(present=True)
+    seen = {}
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, poll_ms=1000, auto_enroll=False)
+
+    def cb():
+        seen["requests_at_callback"] = bus.photo_requests  # 撮影を頼む前に呼ばれるはず
+        seen["shoot_show"] = s.shoot_show
+
+    s.shoot_cb = cb
+    for t in (0, 0, 0):
+        s.update(t)
+    assert seen == {"requests_at_callback": 0, "shoot_show": True}, seen
+    assert bus.photo_requests == 1 and s.shoot_show is True, "撮影の直後も、次に結果を読むまで、SHOOT を出す"
+    s.update(1000)  # 次に結果を読むと、SHOOT は終わる
+    assert s.shoot_show is False
+
+
+def test_shoot_callback_error_does_not_break():
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, auto_enroll=False)
+
+    def bad():
+        raise ValueError("draw failed")
+
+    s.shoot_cb = bad
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.state == hl_status.READY and s.photos == 1, "表示のエラーで、撮影や接続は、止まらない"
+
+
+def test_summary_and_photo_short():
+    bus = FakeBus(present=True)
+    s = hl_status.HuskyStatus(bus, settle_ms=0, max_miss=1, auto_enroll=False)
+    assert s.summary() == ""
+    for t in (0, 0, 0):
+        s.update(t)
+    assert s.summary() == "n=3 ids=1,2,3"
+    assert s.photo_short() == "PHOTO ON 1"
+    s.toggle_photo()
+    assert s.photo_short() == "PHOTO OFF 1"
+    s.photo_fail = True
+    assert s.photo_short() == "PHOTO OFF 1!"
 
 
 def test_no_micropython_incompatible_calls():

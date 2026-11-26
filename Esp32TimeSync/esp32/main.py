@@ -1,20 +1,23 @@
-# ESP32 側: BLE で時刻を受け取って、画面に時計と HuskyLens2 の状態を出す
+# ESP32 側: HuskyLens2 の顔認識の結果を、大きく画面に出す(時計の表示はやめた)
 #
 # 画面 (240x135):
-#   y=4   時刻 HH:MM:SS (大)
-#   y=34  日付と曜日 / 時刻が未同期のときは赤い NO SYNC
-#   y=56  色の帯 (顔の人(ID)ごとに色が変わる。顔がなければ灰色)
-#   y=64  HuskyLens2 の見出し
-#   y=76  HuskyLens2 の状態 (not found / connecting / faces:N。文字も人ごとの色)
-#   y=96  人の詳細 (ID・名前・位置)
-#   y=107 写真の状態 (PHOTO ON/OFF  撮った枚数  直近のファイル名)
-#   y=118 Bluetooth の状態 と 自動登録の状態 (ENR ON/OFF 人数)
+#   y=2   人の呼び名 (大: 文字数に応じて 4/3/2 倍。例: ID01 / unknown / NEW ID01 / SHOOT)
+#   y=40  色の帯 (人(ID)ごとに色が変わる。顔がなければ灰色。撮影中は白)
+#   y=52  顔の数と ID の一覧 (中: 例 n=2 ids=1,0)
+#   y=72  写真の状態 (中: PHOTO ON 3)
+#   y=92  自動登録の状態 (中: ENR ON 2)
+#   y=110 詳細 (小: 位置・エラーなど)
+#   y=122 Bluetooth の状態 (小)
+#
+# 写真を撮る(約0.3〜2.5秒かかる)直前に、画面の一番上に「SHOOT」を出す。
 #
 # BOOT ボタン(基板の「BOOT」):
 #   短く押す      = 顔が見えたら写真を撮る機能の、入り切り
 #   1.5秒以上押す = 知らない顔を自動で覚えさせる(ID01, ID02 …)機能の、入り切り
 #
-# 基板に入れるファイル: lcd.py, hl_status.py, huskylens2.py (なくても時計は動く), main.py
+# 時刻は、いまも BLE で受け取れる(Android アプリはそのまま使える)が、画面には出さない。
+#
+# 基板に入れるファイル: lcd.py, hl_status.py, huskylens2.py (なくても動く), main.py
 
 import bluetooth
 import machine
@@ -42,7 +45,6 @@ _SERVICE = (
     ((bluetooth.UUID(CHR_STR), _FLAG_WRITE | _FLAG_WRITE_NO_RESPONSE),),
 )
 
-WEEK = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 GRAY = 0x4208  # 暗い灰色
 MAGENTA = 0xF81F
 ORANGE = 0xFD20
@@ -102,7 +104,7 @@ def pad(s, n):
 
 
 def make_husky():
-    """HuskyLens2 の状態表示を用意する。部品がなくても、時計は止めない。"""
+    """HuskyLens2 の状態表示を用意する。部品がなくても、動きは止めない。"""
     if hl_status is None:
         return None
     try:
@@ -112,25 +114,78 @@ def make_husky():
     return hl_status.HuskyStatus(i2c)
 
 
+def big_scale(text):
+    """文字数に応じて、いちばん大きく出せる倍率を選ぶ(横 240 ピクセルに収まる範囲)。"""
+    n = len(text)
+    if n <= 7:
+        return 4
+    if n <= 10:
+        return 3
+    return 2
+
+
 def main():
     lcd.init()
     lcd.clear()
-    lcd.rect(8, 56, 224, 3, GRAY)
-    clock = Clock()
+    clock = Clock()  # BLE で時刻を受け取る(画面には出さない)
     husky = make_husky()
     colors = {
         "red": lcd.RED, "yellow": lcd.YELLOW, "green": lcd.GREEN, "blue": lcd.BLUE,
         "white": lcd.WHITE, "cyan": lcd.CYAN, "magenta": MAGENTA, "orange": ORANGE, "gray": GRAY,
     }
     cache = {}
+
+    def row(key, s, y, col, scale):
+        """文字が変わったときだけ描く。同じ行の倍率が変わったときは、行を黒で消してから描く。"""
+        v = (s, col, scale)
+        old = cache.get(key)
+        if old == v:
+            return
+        if old is not None and old[2] != scale:
+            lcd.rect(0, y, 240, 8 * max(old[2], scale), lcd.BLACK)
+        cache[key] = v
+        lcd.text(s, 0, y, col, scale)
+
+    def bar(color):
+        if cache.get("bar") != color:
+            cache["bar"] = color
+            lcd.rect(0, 40, 240, 8, color)
+
+    def draw():
+        """画面全体を描く(変わったところだけ)。写真を撮る直前にも呼ばれる。"""
+        if husky is not None:
+            label, label_color, extra = husky.view()
+            bar_color = colors[husky.person_color()]
+            summary = husky.summary()
+            photo = husky.photo_short()
+            enr = husky.enroll_line()
+            if husky.shoot_show:  # 写真を撮っている間は「SHOOT」
+                label, label_color, bar_color = "SHOOT", lcd.WHITE, lcd.WHITE
+        else:
+            label, label_color, extra = "no driver", lcd.RED, "hl_status.py missing"
+            bar_color, summary, photo, enr = GRAY, "", "PHOTO -", "ENR -"
+        if husky is not None and label_color in colors:
+            label_color = colors[label_color]
+        scale = big_scale(label)
+        chars = 240 // (8 * scale)
+        row("label", pad(label, chars), 2, label_color, scale)
+        bar(bar_color)
+        row("summary", pad(summary, 15), 52, lcd.WHITE, 2)
+        row("photo", pad(photo, 15), 72, lcd.YELLOW, 2)
+        row("enr", pad(enr, 15), 92, lcd.CYAN, 2)
+        row("extra", pad(extra, 30), 110, lcd.WHITE, 1)
+        if clock.conn is not None:
+            ble = "BLE: connected"
+        elif clock.last_error:
+            ble = "ERR: " + clock.last_error
+        else:
+            ble = "BLE: waiting..."
+        row("ble", pad(ble, 30), 122, lcd.GREEN, 1)
+
+    if husky is not None:
+        husky.shoot_cb = draw
     boot = machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP)  # BOOT ボタン
     boot_down_at = None  # BOOT ボタンを押し始めた時刻
-
-    def row(key, s, x, y, col, scale):
-        v = (s, col)
-        if cache.get(key) != v:
-            cache[key] = v
-            lcd.text(s, x, y, col, scale)
 
     while True:
         if husky is not None:
@@ -146,43 +201,7 @@ def main():
                     husky.toggle_enroll()
                 elif held >= 30:
                     husky.toggle_photo()
-        t = time.localtime()
-        if clock.synced:
-            hhmmss = "%02d:%02d:%02d" % (t[3], t[4], t[5])
-            date = "%04d-%02d-%02d %s" % (t[0], t[1], t[2], WEEK[t[6]])
-            time_col, date_col = lcd.CYAN, lcd.WHITE
-        else:
-            hhmmss = "--:--:--"
-            date = "NO SYNC"
-            time_col, date_col = lcd.RED, lcd.RED
-        row("time", hhmmss, 24, 4, time_col, 3)
-        row("date", pad(date, 15), 0, 34, date_col, 2)
-
-        row("hl_title", pad("HUSKYLENS 2  I2C 0x50", 30), 0, 64, lcd.CYAN, 1)
-        if husky is not None:
-            detail, color, extra = husky.view()
-            bar = husky.person_color()
-            photo = husky.photo_line()
-        else:
-            detail, color, extra = "no driver", "red", "hl_status.py missing"
-            bar = "gray"
-            photo = "PHOTO -"
-        key = ("bar", bar)
-        if cache.get("bar") != key:
-            cache["bar"] = key
-            lcd.rect(8, 56, 224, 3, colors[bar])
-        row("hl_detail", pad(detail, 15), 0, 76, colors[color], 2)
-        row("hl_extra", pad(extra, 30), 0, 96, lcd.WHITE, 1)
-        row("photo", pad(photo, 30), 0, 107, lcd.YELLOW, 1)
-
-        if clock.conn is not None:
-            ble = "BLE: connected"
-        elif clock.last_error:
-            ble = "ERR: " + clock.last_error
-        else:
-            ble = "BLE: waiting..."
-        enr = husky.enroll_line() if husky is not None else "ENR -"
-        row("ble", pad(pad(ble, 16) + enr, 30), 0, 118, lcd.GREEN, 1)
+        draw()
         time.sleep_ms(100)
 
 

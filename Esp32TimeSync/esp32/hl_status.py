@@ -78,6 +78,10 @@ class HuskyStatus:
         self.photos = 0  # 電源を入れてから撮った枚数
         self.last_photo = ""  # 直近のファイル名
         self.photo_fail = False
+        # 写真を撮っている間と、その直後(次に結果を読むまで)は True。画面に「SHOOT」を出す目印。
+        self.shoot_show = False
+        # 写真を撮る「直前」に呼ばれる関数。撮影の間は画面の更新が止まるので、先に「SHOOT」を描く。
+        self.shoot_cb = None
         self._last_photo_ms = None
         # 知らない顔(ID 0)が、画面の中央にじっといたら、自動で覚えさせる(ID01, ID02 … の順)
         self.auto_enroll = auto_enroll
@@ -144,6 +148,7 @@ class HuskyStatus:
         elif self.state == READY:
             self._next = now + self.poll_ms
             self.step = "result"
+            self.shoot_show = False  # 前回の「SHOOT」の表示は、次に結果を読むときに、終わる
             try:
                 rs = self.cam.get_results(self.algo)
             except OSError:
@@ -228,6 +233,12 @@ class HuskyStatus:
             return
         self._last_photo_ms = now  # 失敗しても、すぐには撮り直さない
         self.step = "photo"
+        self.shoot_show = True
+        if self.shoot_cb is not None:
+            try:
+                self.shoot_cb()  # 撮影の間は画面が止まるので、先に「SHOOT」を描く
+            except Exception:
+                pass
         try:
             name = self.cam.take_photo(self.photo_res, timeout_ms=2500)
         except OSError:
@@ -262,11 +273,25 @@ class HuskyStatus:
             return ("NEW ID%02d" % self.new_id, id_color(self.new_id), extra[:30])
         return (person_label(r), id_color(r["id"]), extra[:30])
 
+    def summary(self):
+        """大きい文字で出す、顔の数と ID の一覧(15字まで)。顔が見えていなければ空。"""
+        if self.state != READY or not self.polled or self.miss > 0 or self.faces == 0:
+            return ""
+        return ("n=%d ids=%s" % (self.faces, ",".join([str(i) for i in self.ids])))[:15]
+
     def person_color(self):
         """画面の色の帯に使う色の名前。顔がなければ "gray"。"""
         if self.state != READY or self.first is None or self.miss > 0 or not self.polled:
             return "gray"
+        if self.new_id:  # 覚えさせた直後(NEW ID)は、新しい ID の色にそろえる
+            return id_color(self.new_id)
         return id_color(self.first["id"])
+
+    def photo_short(self):
+        """大きい文字で出す、写真の状態(15字まで)。例: PHOTO ON 3 / 失敗したとき PHOTO ON 0!"""
+        if self.state == NO_DRIVER:
+            return "PHOTO -"
+        return "PHOTO %s %d%s" % ("ON" if self.auto_photo else "OFF", self.photos, "!" if self.photo_fail else "")
 
     def photo_line(self):
         """写真の状態を、画面に出す1行(30字まで)で返す。"""

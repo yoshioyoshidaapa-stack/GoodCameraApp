@@ -1,15 +1,14 @@
 @echo off
-chcp 65001 >nul
 echo.
-echo === 基板の COM 番号を調べます ===
-echo 基板(ESP32)を、USB でつないだ状態で、実行してください。
+echo === Find the COM port of the board ===
+echo Connect the ESP32 board by USB first.
 echo.
-echo --- 方法1: mpremote が見つけた機器 ---
+echo --- mpremote devices ---
 py -m mpremote devs
 echo.
-echo --- 方法2: Windows が、見つけたシリアルポート ---
+echo --- Windows serial ports ---
 powershell -NoProfile -Command "Get-CimInstance Win32_SerialPort | Select-Object DeviceID,Name | Format-Table -AutoSize"
 echo.
-echo 「CH340」と書かれた行の、COM3 などが、基板の番号です。
-echo 何も出ない場合は、START_HERE.txt の「3. 基板が見つからないとき」を見てください。
+echo The COM number on the CH340 line (for example COM3) is your board.
+echo If nothing is shown, see START_HERE.txt section 3.
 pause

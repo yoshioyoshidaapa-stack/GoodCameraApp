@@ -151,7 +151,9 @@ def make_husky(mode="face"):
     except Exception:
         i2c = None
     algo, target = hl_status.mode_settings(mode)
-    return hl_status.HuskyStatus(i2c, algo=algo, target=target)
+    # 結果を読む間隔(ミリ秒)。小さいほど動きが滑らか。遅いと感じたら小さく、不安定なら大きくする。
+    # 間隔を短くした分、「見失っても枠を残す回数」と「接続切れとみなす連続失敗回数」を増やして、時間は同じくらいに保つ。
+    return hl_status.HuskyStatus(i2c, algo=algo, target=target, poll_ms=250, hold_polls=3, max_miss=8)
 
 
 def big_scale(text):

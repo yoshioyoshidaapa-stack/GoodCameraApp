@@ -1,0 +1,108 @@
+﻿ESP32 + HuskyLens2 の、プログラムを、基板に入れる手順(Windows 用)
+=====================================================================
+
+※ このセットは、Windows では、まだ試していません(Mac で動いたものと、同じ基板用ファイルです)。
+   うまくいかないところがあれば、画面の文字を、そのまま、教えてください。
+
+【この zip の中身】
+  lcd.py / huskylens2.py / hl_status.py / main.py ... 基板に入れる4つのファイル(Mac と同じ)
+  install_tools.bat ... 道具(mpremote)を入れる(最初の1回だけ)
+  find_port.bat     ... 基板の COM 番号を調べる
+  upload_to_board.bat ... 4つのファイルを、基板に送る
+  run_script.bat    ... 調査用のプログラムを、実行する
+  tools\            ... 調査用のプログラム(hl_object_debug.py など)
+
+  zip は、右クリックして「すべて展開」してから、使ってください。
+  ※ bat ファイルの、日本語が、文字化けしても、動作には影響しません(表示だけです)。
+
+
+1. Python を入れる(まだ入っていない場合)
+-----------------------------------------
+  1) スタートメニューで「cmd」と入力して、「コマンド プロンプト」を開く。
+  2) 次を入力して Enter:   py --version
+     - 「Python 3.…」と出れば、もう入っています。2. へ進んでください。
+     - 「'py' は、認識されていません」と出たら、入っていません。
+       https://www.python.org/downloads/ から、Python をダウンロードして、入れてください。
+       入れるとき、「py launcher」(または「Use admin privileges ...」の下の、py の項目)に、チェックが入っていることを、確認してください。
+       入れたあと、コマンド プロンプトを、開き直してください。
+
+
+2. 道具を入れる(最初の1回だけ)
+-------------------------------
+  install_tools.bat を、ダブルクリックする。
+  「道具を入れました」と出れば、成功です。
+
+
+3. 基板を USB でつないで、COM 番号を調べる
+------------------------------------------
+  1) 基板(ESP32)を、USB ケーブルで、パソコンにつなぐ。
+     データも通せる USB ケーブルを使ってください(充電専用だと、見えません)。
+  2) find_port.bat を、ダブルクリックする。
+     「USB-SERIAL CH340 (COM3)」のような行の、COM3 が、基板の番号です。
+     番号は、パソコンや、USB の差し込み口によって、変わります。
+
+  【基板が見つからないとき】
+   - デバイスマネージャー(スタートを右クリック → デバイス マネージャー)を開く。
+     「ポート (COM と LPT)」の下に、「USB-SERIAL CH340 (COM○)」があれば、認識されています。
+     「その他のデバイス」に、「USB Serial」や、黄色い「!」が、ついているときは、
+     CH340 というチップの、ドライバーが入っていません。
+     「CH340 ドライバー」(WCH という会社のもの)を探して、入れてください。
+   - 別の USB の差し込み口、別のケーブルでも、試してください。
+
+
+4. 基板にファイルを送る
+------------------------
+  1) upload_to_board.bat を、ダブルクリックする。
+  2) 「基板の COM 番号を入力してください」と出たら、COM3 のように入力して Enter。
+  3) 4つのファイルが、順番に、送られます。「4つのファイルを、送りました」と出れば、成功です。
+  4) 基板の EN ボタンを押す。画面が、起動します。
+
+  ※ 先に、HuskyLens2 の電源(電源ボードの USB)を、入れて、起動してから、
+     ESP32 の電源を入れると、安全です(Mac のときと同じ)。
+
+  【自分で、コマンドを打つ場合】(COM3 は、自分の番号に直す)
+     コマンド プロンプトの場合:
+        cd /d %USERPROFILE%\Downloads\board_windows
+        py -m mpremote connect COM3 cp main.py :main.py
+     PowerShell の場合:
+        cd $env:USERPROFILE\Downloads\board_windows
+        py -m mpremote connect COM3 cp main.py :main.py
+
+
+5. 調査用のプログラムを動かす
+-----------------------------
+  run_script.bat を、ダブルクリックして、COM 番号と、ファイル名を入力する。
+  例:  tools\hl_object_debug.py     (鳥など、物体認識の結果を、そのまま表示)
+       tools\hl_step.py             (命令を1つずつ送って、HuskyLens2 が固まる命令を探す)
+       tools\hl_line_check.py       (I2C の線の状態を調べる)
+  止めるときは、Ctrl キーを押しながら C を押します。
+  出た文字は、そのまま、コピーして、貼ってください。
+
+
+6. 困ったとき
+-------------
+  ・「Access is denied」「could not open port」と出る
+      → 別のソフトが、基板を使っています。Thonny、Arduino IDE の「シリアルモニター」、
+        前に開いた黒い画面(mpremote の repl)などを、閉じてください。
+        それでもだめなら、基板の USB を、抜き差ししてください。
+  ・「no device found」と出る
+      → COM 番号が違うか、基板が認識されていません。3. をやり直してください。
+  ・「No module named mpremote」と出る
+      → 2. の install_tools.bat を、もう一度、実行してください。
+  ・ダウンロードしたファイルの名前が、「main (1).py」のように変わっている
+      → 「main.py」に、名前を直してください。
+  ・基板の、画面が、真っ黒、または、おかしい
+      → EN ボタンを押してください。それでもだめなら、画面の様子を、写真で、教えてください。
+
+
+7. Mac のコマンドとの対応(参考)
+--------------------------------
+      Mac                                              Windows
+  基板の名前   /dev/cu.usbserial-8340                  COM3 など(find_port.bat で調べる)
+  実行の頭     python3 -m mpremote ...                 py -m mpremote ...
+  ファイル送信 python3 -m mpremote connect <名前> cp main.py :main.py
+                                                       py -m mpremote connect COM3 cp main.py :main.py
+  プログラム実行 python3 -m mpremote connect <名前> run hl_step.py
+                                                       py -m mpremote connect COM3 run tools\hl_step.py
+  フォルダ移動 cd ~/Downloads                          cd /d %USERPROFILE%\Downloads
+  止める       Control + C                             Ctrl + C

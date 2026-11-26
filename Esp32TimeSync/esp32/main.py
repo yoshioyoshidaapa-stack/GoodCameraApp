@@ -107,6 +107,12 @@ def make_husky():
     """HuskyLens2 の状態表示を用意する。部品がなくても、動きは止めない。"""
     if hl_status is None:
         return None
+    # ESP32 が再起動したとき(ENボタンなど)、通信の途中で止まった HuskyLens2 を、放してやる
+    try:
+        hl_status.bus_clear(machine.Pin, 21, 22, time.sleep_us)
+    except Exception:
+        pass
+    time.sleep_ms(1000)  # 線が落ち着くまで、少し待ってから I2C を使い始める
     try:
         i2c = machine.I2C(0, sda=machine.Pin(21), scl=machine.Pin(22), freq=100000)
     except Exception:

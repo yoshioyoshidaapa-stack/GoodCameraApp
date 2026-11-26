@@ -157,13 +157,16 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, f
     class FakePin:
         IN = 0
         PULL_UP = 2
+        OPEN_DRAIN = 7
 
         def __init__(self, n, *a, **k):
             self.n = n
 
-        def value(self):
-            # BOOT ボタン: 1 = 押していない / 0 = 押している。1ループごとに1つ使う
-            if boot_pattern:
+        def value(self, v=None):
+            if v is not None:
+                return None  # 出力の設定は、試験では何もしない
+            # BOOT ボタン(GPIO0): 1 = 押していない / 0 = 押している。1ループごとに1つ使う
+            if self.n == 0 and boot_pattern:
                 return boot_pattern.pop(0)
             return 1
 
@@ -176,7 +179,8 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, f
         sys.modules["hl_status"] = None  # import すると ImportError になる
 
     state = {"n": 0, "off": 0}
-    real = {k: getattr(time, k, None) for k in ("sleep_ms", "ticks_ms", "ticks_diff")}
+    real = {k: getattr(time, k, None) for k in ("sleep_ms", "sleep_us", "ticks_ms", "ticks_diff")}
+    time.sleep_us = lambda us: None
     start = time.monotonic()
     time.ticks_ms = lambda: int((time.monotonic() - start) * 1000) + state["off"]
     time.ticks_diff = lambda a, b: a - b
@@ -643,6 +647,74 @@ def test_summary_and_photo_short():
     assert s.photo_short() == "PHOTO OFF 1"
     s.photo_fail = True
     assert s.photo_short() == "PHOTO OFF 1!"
+
+
+# ---------- ESP32 の再起動(ENボタン)で固まった HuskyLens2 を放す: I2C のバス復旧 ----------
+class _StuckSlave:
+    """データ線(SDA)を、SCL が release_after 回動くまで、低いまま引っ張る、ニセの相手。"""
+
+    def __init__(self, release_after):
+        self.release_after = release_after
+        self.pulses = 0
+        self.log = []
+
+
+def _pin_factory(slave):
+    class P:
+        OPEN_DRAIN = 7
+
+        def __init__(self, n, mode=None, value=None):
+            self.n = n
+            self.v = 1 if value is None else value
+
+        def value(self, v=None):
+            if v is None:
+                if self.n == 21:  # SDA
+                    return 0 if slave.pulses < slave.release_after else 1
+                return self.v
+            if self.n == 22 and v == 1 and self.v == 0:
+                slave.pulses += 1  # SCL が「低 -> 高」になるたびに、1パルス
+            self.v = v
+            slave.log.append((self.n, v))
+            return None
+
+    return P
+
+
+def test_bus_clear_releases_stuck_slave():
+    slave = _StuckSlave(release_after=3)
+    n = hl_status.bus_clear(_pin_factory(slave), 21, 22, lambda us: None)
+    assert n == 3, "相手が放すまで、SCL を3回動かす"
+    assert slave.log[-3:] == [(21, 0), (22, 1), (21, 1)], "最後に STOP (SCL が高いまま、SDA を 低->高)"
+
+
+def test_bus_clear_does_nothing_when_bus_is_free():
+    slave = _StuckSlave(release_after=0)
+    assert hl_status.bus_clear(_pin_factory(slave), 21, 22, lambda us: None) == 0
+
+
+def test_bus_clear_gives_up_after_nine_pulses():
+    slave = _StuckSlave(release_after=999)
+    assert hl_status.bus_clear(_pin_factory(slave), 21, 22, lambda us: None) == 9
+
+
+def test_probe_uses_only_address_0x50():
+    """見つけるとき、全住所の scan() ではなく、0x50 だけに触れる。"""
+    calls = []
+
+    class Bus(FakeBus):
+        def scan(self):
+            calls.append("scan")
+            return FakeBus.scan(self)
+
+        def readfrom(self, addr, n):
+            calls.append(("readfrom", addr, n))
+            return FakeBus.readfrom(self, addr, n)
+
+    s = hl_status.HuskyStatus(Bus(present=True), settle_ms=0, max_miss=1)
+    s.update(0)
+    assert s.state == hl_status.FOUND
+    assert "scan" not in calls and calls[0] == ("readfrom", 0x50, 16), calls
 
 
 def test_no_micropython_incompatible_calls():

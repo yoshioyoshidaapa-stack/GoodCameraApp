@@ -30,6 +30,30 @@ def id_color(person_id):
     return ID_COLORS[person_id % len(ID_COLORS)]
 
 
+def bus_clear(pin, sda, scl, sleep_us):
+    """相手(HuskyLens2)が、通信の途中で止まって、データ線(SDA)を低いまま引っ張っているとき、
+    クロック線(SCL)を最大9回動かして、通信の続きを終わらせ、最後に STOP を送って、線を解放させる。
+    (I2C の標準的な「バス復旧」。ESP32 が再起動したあとの、最初に1回だけ呼ぶ。)
+    pin は machine.Pin、sleep_us は time.sleep_us。動かした SCL の回数を返す。"""
+    sda_pin = pin(sda, pin.OPEN_DRAIN, value=1)
+    scl_pin = pin(scl, pin.OPEN_DRAIN, value=1)
+    pulses = 0
+    while pulses < 9 and sda_pin.value() == 0:
+        scl_pin.value(0)
+        sleep_us(10)
+        scl_pin.value(1)
+        sleep_us(10)
+        pulses += 1
+    # STOP: SCL が高いまま、SDA を 低 -> 高 にする
+    sda_pin.value(0)
+    sleep_us(10)
+    scl_pin.value(1)
+    sleep_us(10)
+    sda_pin.value(1)
+    sleep_us(10)
+    return pulses
+
+
 def person_label(r):
     """画面の一番大きい行に出す、人の呼び名(15字まで)。
     ID 0 = まだ覚えていない顔 -> unknown / 名前が付いていれば名前 / なければ ID 番号。
@@ -119,7 +143,9 @@ class HuskyStatus:
             self._next = now + self.scan_ms
             self.step = "scan"
             try:
-                found = ADDR in self.i2c.scan()
+                # 全住所を探す scan() はやめて、HuskyLens2 の住所 0x50 だけに、公式の部品と同じ読み方で触れる
+                self.i2c.readfrom(ADDR, 16)
+                found = True
             except OSError:
                 found = False
             if found:

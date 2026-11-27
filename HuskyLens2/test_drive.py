@@ -187,8 +187,30 @@ def test_avoid_wall_while_scouting_forward():
     assert pl.update(none, t + 800, "back", 20) == "back"
     assert pl.update(none, t + 1300, "back", 40) == "right", "下がったあと、壁から離れる向き(さっきと逆の右)へ回る"
     assert pl.update(none, t + 2000, "right", 40) == "right"
-    assert pl.update(none, t + 2400, "right", 40) == "stop", "回り終わったら、止まって見る(偵察を再開)"
+    assert pl.update(none, t + 2400, "right", 100) == "stop", "回り終わって、前が空いたら、止まって見る(偵察を再開)"
     assert not pl.avoiding
+
+
+def test_avoid_keeps_turning_until_clear_but_not_forever():
+    pl = drive.Planner(lost_ms=1000, turn_ms=500, look_ms=500, steps=2, forward_ms=5000,
+                       stop_cm=25, confirm_n=2, back_ms=1000, avoid_turn_ms=1000, clear_cm=60, avoid_turn_max_ms=4000)
+    pl.update(FakeHusky(x=100), 0, "stop")
+    none = FakeHusky(faces=0)
+    t, _ = _scout_to_forward(pl, none)
+    pl.update(none, t + 100, "forward", 20)
+    assert pl.update(none, t + 200, "forward", 20) == "back"
+    assert pl.update(none, t + 1300, "back", 40) == "right"
+    assert pl.update(none, t + 2500, "right", 40) == "right", "最低時間をすぎても、前がまだ近い(40cm)間は回り続ける"
+    assert pl.update(none, t + 3200, "right", 70) == "stop", "前が空いたら(70cm)、やめる"
+    pl2 = drive.Planner(lost_ms=1000, turn_ms=500, look_ms=500, steps=2, forward_ms=5000, confirm_n=2,
+                        back_ms=1000, avoid_turn_ms=1000, clear_cm=60, avoid_turn_max_ms=4000)
+    pl2.update(FakeHusky(x=100), 0, "stop")
+    t, _ = _scout_to_forward(pl2, none)
+    pl2.update(none, t + 100, "forward", 20)
+    pl2.update(none, t + 200, "forward", 20)
+    pl2.update(none, t + 1300, "back", 40)
+    assert pl2.update(none, t + 3000, "right", 40) == "right"
+    assert pl2.update(none, t + 5400, "right", 40) == "stop", "出口が見つからなくても、上限(4秒)で止まって見る"
 
 
 def test_no_sensor_means_no_avoidance():

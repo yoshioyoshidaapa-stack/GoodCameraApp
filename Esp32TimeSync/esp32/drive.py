@@ -24,7 +24,9 @@ PIN_ECHO = 33  # センサーの ECHO をつなぐ GPIO 番号(★5V の ECHO �
 STOP_CM = 25  # これより近いものが前にあれば、前進をやめる(センチ)
 CONFIRM_N = 2  # 近いという測定が、続けて何回出たら、本当に近いと判断するか(ノイズ対策)
 BACK_MS = 1000  # ぶつかりそうなとき、後ろに下がる時間
-AVOID_TURN_MS = 1000  # 下がったあと、壁から離れる向きに回る時間
+AVOID_TURN_MS = 1000  # 下がったあと、壁から離れる向きに、最低これだけ回る時間
+CLEAR_CM = 60  # 前がこれより遠くなるまで、回り続ける(角に追い込まれても、抜け出せるように)
+AVOID_TURN_MAX_MS = 4000  # 回り続ける時間の上限(出口が見つからなくても、止まらず次へ進む)
 
 try:
     from time import ticks_diff
@@ -146,7 +148,8 @@ class Planner:
 
     def __init__(self, lost_ms=LOST_MS, turn_ms=TURN_MS, look_ms=LOOK_MS, steps=STEPS_PER_TURN,
                  forward_ms=FORWARD_MS, img_w=IMG_W, stop_cm=STOP_CM, confirm_n=CONFIRM_N,
-                 back_ms=BACK_MS, avoid_turn_ms=AVOID_TURN_MS):
+                 back_ms=BACK_MS, avoid_turn_ms=AVOID_TURN_MS, clear_cm=CLEAR_CM,
+                 avoid_turn_max_ms=AVOID_TURN_MAX_MS):
         self.lost_ms = lost_ms
         self.turn_ms = turn_ms
         self.look_ms = look_ms
@@ -157,6 +160,8 @@ class Planner:
         self.confirm_n = confirm_n
         self.back_ms = back_ms
         self.avoid_turn_ms = avoid_turn_ms
+        self.clear_cm = clear_cm
+        self.avoid_turn_max_ms = avoid_turn_max_ms
         self.reset(0)
 
     def reset(self, now):
@@ -199,6 +204,8 @@ class Planner:
                 return self._turn_cmd()
             if elapsed < self.avoid_turn_ms:
                 return self._turn_cmd()
+            if elapsed < self.avoid_turn_max_ms and dist_cm is not None and dist_cm < self.clear_cm:
+                return self._turn_cmd()  # まだ前が近い: 空いている方向を向くまで、回り続ける
             self.avoiding = False  # よけ終わり: 探すのを、見る(止まる)ところから再開
             self.phase = "look"
             self.phase_start = now

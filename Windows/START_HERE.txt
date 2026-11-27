@@ -5,10 +5,10 @@
    うまくいかないところがあれば、画面の文字を、そのまま、教えてください。
 
 【この zip の中身】
-  lcd.py / huskylens2.py / hl_status.py / main.py ... 基板に入れる4つのファイル(Mac と同じ)
+  lcd.py / huskylens2.py / hl_status.py / drive.py / main.py ... 基板に入れる5つのファイル(Mac と同じ)
   install_tools.bat ... 道具(mpremote)を入れる(最初の1回だけ)
   find_port.bat     ... 基板の COM 番号を調べる
-  upload_to_board.bat ... 4つのファイルを、基板に送る
+  upload_to_board.bat ... 5つのファイルを、基板に送る
   run_script.bat    ... 調査用のプログラムを、実行する
   tools\            ... 調査用のプログラム(hl_object_debug.py など)
 
@@ -54,7 +54,7 @@
 ------------------------
   1) upload_to_board.bat を、ダブルクリックする。
   2) 「基板の COM 番号を入力してください」と出たら、COM3 のように入力して Enter。
-  3) 4つのファイルが、順番に、送られます。「4つのファイルを、送りました」と出れば、成功です。
+  3) 5つのファイルが、順番に、送られます。「DONE」と出れば、成功です。
   4) 基板の EN ボタンを押す。画面が、起動します。
 
   ※ 先に、HuskyLens2 の電源(電源ボードの USB)を、入れて、起動してから、
@@ -81,6 +81,7 @@
 
 6. 困ったとき
 -------------
+  ・通信できない USB ケーブル(充電専用)だと、「could not enter raw repl」と出ます。別のケーブルで試してください。
   ・「Access is denied」「could not open port」と出る
       → 別のソフトが、基板を使っています。Thonny、Arduino IDE の「シリアルモニター」、
         前に開いた黒い画面(mpremote の repl)などを、閉じてください。

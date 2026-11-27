@@ -1,13 +1,13 @@
 @echo off
 cd /d "%~dp0"
 echo.
-echo === Sending 4 files to the board ===
+echo === Sending 5 files to the board ===
 echo.
 set "PORT=%~1"
 if "%PORT%"=="" set /p PORT=Enter COM port, for example COM3 : 
 if "%PORT%"=="" goto noport
-for %%F in (lcd.py huskylens2.py hl_status.py main.py) do call :check %%F
-for %%F in (lcd.py huskylens2.py hl_status.py main.py) do call :send %%F
+for %%F in (lcd.py huskylens2.py hl_status.py drive.py main.py) do call :check %%F
+for %%F in (lcd.py huskylens2.py hl_status.py drive.py main.py) do call :send %%F
 if errorlevel 1 exit /b 1
 echo.
 echo DONE. Press the EN button on the board.

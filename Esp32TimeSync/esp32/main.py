@@ -304,8 +304,10 @@ def main():
         row("b_photo", pad("PH:%s %d" % ("ON" if husky.auto_photo else "OFF", husky.photos), 9), 90, lcd.YELLOW, 1, 164, 76)
         row("b_seen", pad(husky.seen, 9), 102, lcd.GREEN, 1, 164, 76)
         if drive is not None:  # 走行の状態: DR:OFF(動かない) / DR:ON FWD(前進) LFT(左) RGT(右) STP(停止)
-            short = {"forward": "FWD", "left": "LFT", "right": "RGT"}.get(drive.cmd, "STP")
-            if planner.scouting:
+            short = {"forward": "FWD", "back": "BCK", "left": "LFT", "right": "RGT"}.get(drive.cmd, "STP")
+            if planner.avoiding:
+                short = "AVD"  # 壁をよけている
+            elif planner.scouting:
                 short = "S-" + short[0]  # 偵察中(探して回っている): S-L / S-R / S-F / S-S(止まって見ている)
             row("b_ble", pad("DR:ON " + short if drive.enabled else "DR:OFF", 9), 114,
                 lcd.RED if drive.enabled else GRAY, 1, 164, 76)
@@ -343,6 +345,15 @@ def main():
         except Exception:
             drive = None  # サーボが使えなくても、画面は動かす
 
+    sonar = None  # 前方の距離センサー(つながっていなくても、動く)
+    if drive is not None:
+        try:
+            sonar = drive_mod.Sonar(machine.Pin(drive_mod.PIN_TRIG, machine.Pin.OUT),
+                                    machine.Pin(drive_mod.PIN_ECHO, machine.Pin.IN),
+                                    machine.time_pulse_us, time.sleep_us)
+        except Exception:
+            sonar = None
+
     def shoot_draw():
         # 写真を撮っている間(最大数秒)は、結果が読めず、動きを直せない。先に止める。
         if drive is not None:
@@ -378,7 +389,8 @@ def main():
                     husky.toggle_photo()
         if drive is not None:
             if state["mode"] == "bird":
-                drive.command(planner.update(husky, time.ticks_ms(), drive.cmd))
+                dist = sonar.measure() if (sonar is not None and drive.enabled) else None
+                drive.command(planner.update(husky, time.ticks_ms(), drive.cmd, dist))
             else:
                 drive.stop()
                 planner.reset(time.ticks_ms())

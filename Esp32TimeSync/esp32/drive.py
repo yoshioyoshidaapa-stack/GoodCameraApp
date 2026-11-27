@@ -18,6 +18,13 @@ TURN_MS = 500  # 探すとき、1回に回る時間
 LOOK_MS = 1200  # 回ったあと、止まって見る時間(動いている間は、画像がぶれて、見つかりにくい)
 STEPS_PER_TURN = 12  # 「回る→見る」を、この回数やったら(だいたい1周)、少し前進する
 FORWARD_MS = 2000  # 1周しても見つからないとき、前進する時間
+# 前方の壁よけ(超音波距離センサー HC-SR04 など)
+PIN_TRIG = 27  # センサーの TRIG をつなぐ GPIO 番号
+PIN_ECHO = 33  # センサーの ECHO をつなぐ GPIO 番号(★5V の ECHO は、抵抗2本で 3.3V 以下に下げてから)
+STOP_CM = 25  # これより近いものが前にあれば、前進をやめる(センチ)
+CONFIRM_N = 2  # 近いという測定が、続けて何回出たら、本当に近いと判断するか(ノイズ対策)
+BACK_MS = 1000  # ぶつかりそうなとき、後ろに下がる時間
+AVOID_TURN_MS = 1000  # 下がったあと、壁から離れる向きに回る時間
 
 try:
     from time import ticks_diff
@@ -44,6 +51,8 @@ def wheel_signs(cmd):
     """動き -> (左, 右)。1 = 前に回す / -1 = 後ろに回す / 0 = 止める。(その場で回る: 左右を逆に回す)"""
     if cmd == "forward":
         return (1, 1)
+    if cmd == "back":
+        return (-1, -1)
     if cmd == "left":
         return (-1, 1)  # 左に回る = 左を後ろ、右を前
     if cmd == "right":
@@ -110,17 +119,44 @@ def _track(husky, current):
     return decide(first["x"], first["w"])
 
 
+class Sonar:
+    """超音波距離センサー。measure() で、前にあるものまでの距離(センチ)を返す。何も返ってこなければ None。"""
+
+    def __init__(self, trig, echo, pulse_fn, sleep_us, timeout_us=15000):
+        self.trig = trig
+        self.echo = echo
+        self.pulse_fn = pulse_fn  # machine.time_pulse_us
+        self.sleep_us = sleep_us
+        self.timeout_us = timeout_us  # 15 ms = 約2.5 m まで
+
+    def measure(self):
+        self.trig.value(0)
+        self.sleep_us(2)
+        self.trig.value(1)
+        self.sleep_us(10)
+        self.trig.value(0)
+        t = self.pulse_fn(self.echo, 1, self.timeout_us)
+        if t is None or t <= 0:
+            return None
+        return t / 58.0  # 音が往復する時間 → 距離(cm)
+
+
 class Planner:
     """見えているときは追いかけ、見えなくなったら、しばらく待ってから、回って探す(偵察)。"""
 
     def __init__(self, lost_ms=LOST_MS, turn_ms=TURN_MS, look_ms=LOOK_MS, steps=STEPS_PER_TURN,
-                 forward_ms=FORWARD_MS, img_w=IMG_W):
+                 forward_ms=FORWARD_MS, img_w=IMG_W, stop_cm=STOP_CM, confirm_n=CONFIRM_N,
+                 back_ms=BACK_MS, avoid_turn_ms=AVOID_TURN_MS):
         self.lost_ms = lost_ms
         self.turn_ms = turn_ms
         self.look_ms = look_ms
         self.steps = steps
         self.forward_ms = forward_ms
         self.img_w = img_w
+        self.stop_cm = stop_cm
+        self.confirm_n = confirm_n
+        self.back_ms = back_ms
+        self.avoid_turn_ms = avoid_turn_ms
         self.reset(0)
 
     def reset(self, now):
@@ -130,11 +166,43 @@ class Planner:
         self.phase = "turn"
         self.phase_start = now
         self.step_n = 0
+        self.avoiding = False  # 壁をよけている最中
+        self.avoid_phase = "back"
+        self.avoid_start = now
+        self._near_n = 0
+        self.blocked = False  # 前に、近いものがある
 
-    def update(self, husky, now, current):
-        """いまの動き ('forward' / 'left' / 'right' / 'stop') を返す。"""
+    def _update_blocked(self, dist_cm):
+        if dist_cm is not None and dist_cm < self.stop_cm:
+            self._near_n += 1
+        else:
+            self._near_n = 0  # 測れなかった(遠い)ときも、近くないとみなす
+        self.blocked = self._near_n >= self.confirm_n
+
+    def _turn_cmd(self):
+        return "right" if self.side > 0 else "left"
+
+    def update(self, husky, now, current, dist_cm=None):
+        """いまの動き ('forward' / 'back' / 'left' / 'right' / 'stop') を返す。
+        dist_cm: 前方の距離センサーの値(センチ)。なし(None)なら、壁よけはしない。"""
+        self._update_blocked(dist_cm)
         if husky is None or not husky.is_ready():
             self.reset(now)  # つながっていない間は止まる。つながったら、待ってから探し始める
+            return "stop"
+        if self.avoiding:  # 壁をよけている最中は、これを最後までやる: 下がる → 離れる向きに回る
+            elapsed = ticks_diff(now, self.avoid_start)
+            if self.avoid_phase == "back":
+                if elapsed < self.back_ms:
+                    return "back"
+                self.avoid_phase = "turn"
+                self.avoid_start = now
+                return self._turn_cmd()
+            if elapsed < self.avoid_turn_ms:
+                return self._turn_cmd()
+            self.avoiding = False  # よけ終わり: 探すのを、見る(止まる)ところから再開
+            self.phase = "look"
+            self.phase_start = now
+            self.step_n = 0
             return "stop"
         cmd = _track(husky, current)
         if cmd is not None:  # 鳥が見えている
@@ -143,6 +211,8 @@ class Planner:
             first = husky.first
             if first is not None:
                 self.side = 1 if first["x"] >= self.img_w // 2 else -1
+            if cmd == "forward" and self.blocked:
+                return "stop"  # 鳥は前にいるが、手前に壁などがある: ぶつからないよう止まる
             return cmd
         if ticks_diff(now, self.last_seen) < self.lost_ms:
             return "stop"  # 見失った直後は、止まって待つ
@@ -169,6 +239,12 @@ class Planner:
                 self.phase = "turn"
                 return "right" if self.side > 0 else "left"
             return "stop"
+        if self.blocked:  # 前進中に、前が近い: 下がって、壁から離れる向きに回る(毎回、向きを替えて、角にはまらないように)
+            self.avoiding = True
+            self.avoid_phase = "back"
+            self.avoid_start = now
+            self.side = -self.side
+            return "back"
         if elapsed >= self.forward_ms:  # forward
             self.phase = "turn"
             self.phase_start = now

@@ -139,6 +139,77 @@ def test_scouting_stops_when_not_connected():
     assert pl.update(none, 1200, "stop") == "stop", "つながり直したら、また待ってから探す"
 
 
+def test_wheel_signs_back():
+    assert drive.wheel_signs("back") == (-1, -1)
+
+
+def test_sonar_measure():
+    class Pin:
+        def __init__(self):
+            self.log = []
+
+        def value(self, v=None):
+            self.log.append(v)
+
+    sleeps = []
+    pin = Pin()
+    s = drive.Sonar(pin, object(), lambda echo, level, timeout: 580, lambda us: sleeps.append(us))
+    assert abs(s.measure() - 10.0) < 1e-6, "580 マイクロ秒 = 10 cm"
+    assert pin.log == [0, 1, 0] and sleeps == [2, 10]
+    s2 = drive.Sonar(Pin(), object(), lambda *a: -2, lambda us: None)
+    assert s2.measure() is None, "返事がなければ None"
+    s3 = drive.Sonar(Pin(), object(), lambda *a: None, lambda us: None)
+    assert s3.measure() is None
+
+
+def _scout_to_forward(pl, none, start=1000):
+    """見失ってから、偵察の「前進」に入るところまで時間を進める。(時刻, 最後の動き) を返す。"""
+    t = start
+    cmd = "stop"
+    for _ in range(400):
+        cmd = pl.update(none, t, cmd)
+        if cmd == "forward":
+            return t, cmd
+        t += 100
+    raise AssertionError("前進に入らない")
+
+
+def test_avoid_wall_while_scouting_forward():
+    pl = drive.Planner(lost_ms=1000, turn_ms=500, look_ms=500, steps=2, forward_ms=5000,
+                       stop_cm=25, confirm_n=2, back_ms=1000, avoid_turn_ms=1000)
+    pl.update(FakeHusky(x=100), 0, "stop")  # 左寄りで見えていた -> side = -1(左)
+    none = FakeHusky(faces=0)
+    t, _ = _scout_to_forward(pl, none)
+    assert pl.update(none, t + 100, "forward", 100) == "forward", "遠いうちは、前進を続ける"
+    assert pl.update(none, t + 200, "forward", 20) == "forward", "1回だけ近くても、まだ前進(ノイズ対策)"
+    assert pl.update(none, t + 300, "forward", 20) == "back", "続けて近い: 下がる"
+    assert pl.avoiding
+    assert pl.update(none, t + 800, "back", 20) == "back"
+    assert pl.update(none, t + 1300, "back", 40) == "right", "下がったあと、壁から離れる向き(さっきと逆の右)へ回る"
+    assert pl.update(none, t + 2000, "right", 40) == "right"
+    assert pl.update(none, t + 2400, "right", 40) == "stop", "回り終わったら、止まって見る(偵察を再開)"
+    assert not pl.avoiding
+
+
+def test_no_sensor_means_no_avoidance():
+    pl = drive.Planner(lost_ms=1000, turn_ms=500, look_ms=500, steps=2, forward_ms=1000)
+    pl.update(FakeHusky(x=100), 0, "stop")
+    none = FakeHusky(faces=0)
+    t, _ = _scout_to_forward(pl, none)
+    for k in range(1, 5):
+        assert pl.update(none, t + k * 100, "forward", None) == "forward", "距離センサーがなければ、壁よけはしない"
+
+
+def test_tracking_forward_stops_when_wall_ahead():
+    pl = drive.Planner(stop_cm=25, confirm_n=2)
+    bird = FakeHusky(x=320)
+    assert pl.update(bird, 0, "stop", 100) == "forward"
+    assert pl.update(bird, 100, "forward", 20) == "forward"
+    assert pl.update(bird, 200, "forward", 20) == "stop", "鳥は前だが、手前が近い: 止まる"
+    assert pl.update(FakeHusky(x=100), 300, "stop", 20) == "left", "回るのは、壁が近くてもできる"
+    assert pl.update(bird, 400, "stop", 100) == "forward", "壁が遠のけば、また前進"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

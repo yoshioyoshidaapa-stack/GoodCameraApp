@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 760" width="1100" height="760" font-family="Noto Sans CJK JP, WenQuanYi Zen Hei, Hiragino Sans, Yu Gothic, sans-serif">
 <rect width="1100" height="760" fill="#ffffff"/>
-<text x="550" y="36" font-size="26" font-weight="bold" text-anchor="middle" fill="#111">配線図：クローラー（サーボ2個 + ESP32 + HuskyLens2）</text>
+<text x="550" y="36" font-size="26" font-weight="bold" text-anchor="middle" fill="#111">配線図：クローラー（サーボ2個 + 距離センサー + ESP32 + HuskyLens2）</text>
 <text x="550" y="60" font-size="14" text-anchor="middle" fill="#a00">※ 設計図です。実機では未確認。つなぐときは、必ずバッテリーを外した状態で</text>
 
 <!-- battery -->
@@ -74,12 +74,33 @@
 <text x="260" y="647" font-size="13" fill="#c00">+5V（赤）: 端子台 → 両方のサーボの赤 / コンデンサの + 側</text>
 <text x="250" y="700" font-size="13" fill="#111">GND（黒）: 端子台 → 両方のサーボの茶 / ESP32 の GND にも必ずつなぐ</text>
 
+
+<!-- ultrasonic sensor -->
+<circle cx="560" cy="350" r="7" fill="#9a4" stroke="#000"/><text x="560" y="372" font-size="14" font-weight="bold" text-anchor="middle" fill="#111">GPIO27</text>
+<circle cx="600" cy="350" r="7" fill="#9a4" stroke="#000"/><text x="610" y="390" font-size="14" font-weight="bold" text-anchor="middle" fill="#111">GPIO33</text>
+<rect x="700" y="450" width="350" height="170" rx="10" fill="#fffbe0" stroke="#a80" stroke-width="2"/>
+<text x="875" y="476" font-size="16" font-weight="bold" text-anchor="middle" fill="#540">前方の距離センサー（HC-SR04 など）</text>
+<text x="715" y="502" font-size="13" fill="#222">TRIG → GPIO27（そのまま）</text>
+<text x="715" y="522" font-size="13" fill="#222">ECHO → 抵抗で電圧を下げてから GPIO33</text>
+<text x="715" y="542" font-size="12" fill="#a00">（ECHO は 5V。1kΩ と 2kΩ の抵抗2本で分圧：</text>
+<text x="715" y="558" font-size="12" fill="#a00">ECHO→1kΩ→(ここを GPIO33 へ)→2kΩ→GND）</text>
+<text x="715" y="580" font-size="13" fill="#a00">VCC → +5V（赤）</text>
+<text x="715" y="600" font-size="13" fill="#111">GND → GND（黒）</text>
+<path d="M560 357 V430 H700" fill="none" stroke="#9a4" stroke-width="3"/>
+<path d="M600 357 V440 H690 V528 H700" fill="none" stroke="#9a4" stroke-width="3" stroke-dasharray="1 0"/>
+<text x="660" y="425" font-size="11" fill="#573">TRIG</text><text x="640" y="455" font-size="11" fill="#573">ECHO(分圧後)</text>
+<line x1="930" y1="620" x2="930" y2="655" stroke="#c00" stroke-width="3"/>
+<line x1="990" y1="620" x2="990" y2="680" stroke="#222" stroke-width="3"/>
+<path d="M990 645 a6 6 0 0 1 0 20" fill="none" stroke="#fffbe0" stroke-width="6"/>
+<path d="M990 645 a6 6 0 0 1 0 20" fill="none" stroke="#222" stroke-width="2"/>
+
 <!-- capacitor -->
-<line x1="860" y1="655" x2="860" y2="662" stroke="#c00" stroke-width="3"/>
-<line x1="860" y1="680" x2="860" y2="672" stroke="#222" stroke-width="3"/>
-<line x1="842" y1="662" x2="878" y2="662" stroke="#111" stroke-width="4"/>
-<line x1="842" y1="672" x2="878" y2="672" stroke="#111" stroke-width="4"/>
-<text x="890" y="640" font-size="12" fill="#111">コンデンサ 470〜1000µF</text><text x="890" y="627" font-size="12" fill="#111">（+と−の向きに注意）</text>
+<line x1="600" y1="655" x2="600" y2="662" stroke="#c00" stroke-width="3"/>
+<line x1="600" y1="680" x2="600" y2="672" stroke="#222" stroke-width="3"/>
+<line x1="582" y1="662" x2="618" y2="662" stroke="#111" stroke-width="4"/>
+<line x1="582" y1="672" x2="618" y2="672" stroke="#111" stroke-width="4"/>
+<text x="630" y="716" font-size="12" fill="#111">↑ コンデンサ 470〜1000µF（+と−の向きに注意）</text>
+<line x1="615" y1="682" x2="625" y2="704" stroke="#111" stroke-width="1"/>
 
 <text x="40" y="732" font-size="14" fill="#111">① サーボの電気は、基板の 3.3V や基板の USB からは取らない（口②から別に取る）。② ESP32 の GND と 端子台の GND を必ずつなぐ。</text>
 <text x="40" y="754" font-size="14" fill="#111">③ 電源を入れる前に、赤と黒の取り違い・線の触れ合い（ショート）がないか確認する。</text>

@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 760" width="1100" height="760" font-family="Noto Sans CJK JP, WenQuanYi Zen Hei, Hiragino Sans, Yu Gothic, sans-serif">
+<rect width="1100" height="760" fill="#ffffff"/>
+<text x="550" y="36" font-size="26" font-weight="bold" text-anchor="middle" fill="#111">配線図：クローラー（サーボ2個 + ESP32 + HuskyLens2）</text>
+<text x="550" y="60" font-size="14" text-anchor="middle" fill="#a00">※ 設計図です。実機では未確認。つなぐときは、必ずバッテリーを外した状態で</text>
+
+<!-- battery -->
+<rect x="30" y="110" width="190" height="300" rx="12" fill="#fff4d6" stroke="#a60" stroke-width="2"/>
+<text x="125" y="142" font-size="18" font-weight="bold" text-anchor="middle" fill="#520">モバイルバッテリー</text>
+<text x="125" y="164" font-size="12" text-anchor="middle" fill="#740">出力 1A 以上 × 3口が必要</text>
+<text x="125" y="182" font-size="12" text-anchor="middle" fill="#740">(足りなければ、分配アダプタ)</text>
+<rect x="196" y="210" width="26" height="30" fill="#ddd" stroke="#333"/><text x="125" y="231" font-size="15" text-anchor="middle" fill="#111">口① 基板用</text>
+<rect x="196" y="290" width="26" height="30" fill="#ddd" stroke="#333"/><text x="125" y="311" font-size="15" text-anchor="middle" fill="#111">口② サーボ用</text>
+<rect x="196" y="370" width="26" height="30" fill="#ddd" stroke="#333"/><text x="125" y="391" font-size="15" text-anchor="middle" fill="#111">口③ HuskyLens2用</text>
+
+<!-- ESP32 -->
+<rect x="420" y="110" width="220" height="240" rx="10" fill="#eef3ff" stroke="#355" stroke-width="2"/>
+<text x="530" y="140" font-size="18" font-weight="bold" text-anchor="middle" fill="#123">ESP32 基板</text>
+<text x="530" y="160" font-size="12" text-anchor="middle" fill="#345">USB-C から給電 (口①)</text>
+<circle cx="640" cy="200" r="7" fill="#ff8c00" stroke="#000"/><text x="626" y="206" font-size="17" font-weight="bold" text-anchor="end" fill="#111">GPIO25</text>
+<circle cx="640" cy="250" r="7" fill="#ff8c00" stroke="#000"/><text x="626" y="256" font-size="17" font-weight="bold" text-anchor="end" fill="#111">GPIO26</text>
+<circle cx="640" cy="300" r="7" fill="#222" stroke="#000"/><text x="626" y="306" font-size="17" font-weight="bold" text-anchor="end" fill="#111">GND</text>
+<circle cx="420" cy="200" r="7" fill="#1faa3c" stroke="#000"/><text x="434" y="206" font-size="17" font-weight="bold" fill="#111">D21 (SDA)</text>
+<circle cx="420" cy="250" r="7" fill="#1e5fe0" stroke="#000"/><text x="434" y="256" font-size="17" font-weight="bold" fill="#111">D22 (SCL)</text>
+<circle cx="420" cy="300" r="7" fill="#222" stroke="#000"/><text x="434" y="306" font-size="17" font-weight="bold" fill="#111">GND</text>
+<path d="M222 225 H300 V150 H420" fill="none" stroke="#c00" stroke-width="3"/>
+<text x="300" y="140" font-size="12" fill="#c00">USB ケーブル(口①→基板)</text>
+
+<!-- Husky power board -->
+<rect x="330" y="470" width="250" height="150" rx="10" fill="#eaf7ea" stroke="#363" stroke-width="2"/>
+<text x="455" y="500" font-size="17" font-weight="bold" text-anchor="middle" fill="#131">HuskyLens2 電源ボード</text>
+<text x="455" y="520" font-size="12" text-anchor="middle" fill="#252">PWR IN の USB-C に給電 (口③)</text>
+<text x="455" y="545" font-size="12" text-anchor="middle" fill="#252">緑=SDA(D21) 青=SCL(D22) 黒=GND</text>
+<text x="455" y="563" font-size="12" text-anchor="middle" fill="#252">赤線はつながない (前の図と同じ)</text>
+<text x="455" y="595" font-size="12" text-anchor="middle" fill="#252">→ HuskyLens2 本体へ (付属ケーブル)</text>
+<path d="M222 385 H300 V520 H330" fill="none" stroke="#c00" stroke-width="3"/>
+<text x="232" y="445" font-size="12" fill="#c00">USB ケーブル(口③→電源ボード)</text>
+<path d="M420 200 H380 V470" fill="none" stroke="#1faa3c" stroke-width="3"/>
+<path d="M420 250 H395 V470" fill="none" stroke="#1e5fe0" stroke-width="3"/>
+<path d="M420 300 H410 V470" fill="none" stroke="#222" stroke-width="3"/>
+
+<!-- USB terminal board -->
+<rect x="40" y="600" width="200" height="110" rx="10" fill="#f3e9ff" stroke="#639" stroke-width="2"/>
+<text x="140" y="624" font-size="16" font-weight="bold" text-anchor="middle" fill="#306">USB 端子台</text>
+<text x="140" y="641" font-size="11" text-anchor="middle" fill="#306">(USBの電気を線に出す小さい基板)</text>
+<text x="140" y="665" font-size="14" text-anchor="middle" fill="#a00">+5V ● 赤</text>
+<text x="140" y="687" font-size="14" text-anchor="middle" fill="#111">GND ● 黒</text>
+<path d="M209 320 V570 H140 V600" fill="none" stroke="#c00" stroke-width="3"/>
+<text x="150" y="590" font-size="11" fill="#c00">口②から USB ケーブル</text>
+
+<!-- servos -->
+<rect x="760" y="110" width="290" height="140" rx="10" fill="#fff0f0" stroke="#a33" stroke-width="2"/>
+<text x="905" y="138" font-size="17" font-weight="bold" text-anchor="middle" fill="#511">左サーボ (SG90-HV)</text>
+<text x="775" y="168" font-size="14" fill="#222">橙(信号) → ESP32 GPIO25</text>
+<text x="775" y="192" font-size="14" fill="#a00">赤(+) → +5V</text>
+<text x="775" y="216" font-size="14" fill="#111">茶(−) → GND</text>
+<rect x="760" y="280" width="290" height="140" rx="10" fill="#fff0f0" stroke="#a33" stroke-width="2"/>
+<text x="905" y="308" font-size="17" font-weight="bold" text-anchor="middle" fill="#511">右サーボ (SG90-HV)</text>
+<text x="775" y="338" font-size="14" fill="#222">橙(信号) → ESP32 GPIO26</text>
+<text x="775" y="362" font-size="14" fill="#a00">赤(+) → +5V</text>
+<text x="775" y="386" font-size="14" fill="#111">茶(−) → GND</text>
+<path d="M647 200 H700 V153 H760" fill="none" stroke="#ff8c00" stroke-width="3"/>
+<path d="M647 250 H720 V323 H760" fill="none" stroke="#ff8c00" stroke-width="3"/>
+
+<!-- power rails -->
+<line x1="240" y1="655" x2="1075" y2="655" stroke="#c00" stroke-width="4"/>
+<line x1="1075" y1="655" x2="1075" y2="190" stroke="#c00" stroke-width="4"/>
+<line x1="1075" y1="190" x2="1050" y2="190" stroke="#c00" stroke-width="4"/>
+<line x1="1075" y1="360" x2="1050" y2="360" stroke="#c00" stroke-width="4"/>
+<line x1="240" y1="680" x2="1062" y2="680" stroke="#222" stroke-width="4"/>
+<line x1="1062" y1="680" x2="1062" y2="214" stroke="#222" stroke-width="4"/>
+<line x1="1062" y1="214" x2="1050" y2="214" stroke="#222" stroke-width="4"/>
+<line x1="1062" y1="384" x2="1050" y2="384" stroke="#222" stroke-width="4"/>
+<line x1="640" y1="680" x2="640" y2="307" stroke="#222" stroke-width="4"/>
+<text x="260" y="647" font-size="13" fill="#c00">+5V（赤）: 端子台 → 両方のサーボの赤 / コンデンサの + 側</text>
+<text x="250" y="700" font-size="13" fill="#111">GND（黒）: 端子台 → 両方のサーボの茶 / ESP32 の GND にも必ずつなぐ</text>
+
+<!-- capacitor -->
+<line x1="860" y1="655" x2="860" y2="662" stroke="#c00" stroke-width="3"/>
+<line x1="860" y1="680" x2="860" y2="672" stroke="#222" stroke-width="3"/>
+<line x1="842" y1="662" x2="878" y2="662" stroke="#111" stroke-width="4"/>
+<line x1="842" y1="672" x2="878" y2="672" stroke="#111" stroke-width="4"/>
+<text x="890" y="640" font-size="12" fill="#111">コンデンサ 470〜1000µF</text><text x="890" y="627" font-size="12" fill="#111">（+と−の向きに注意）</text>
+
+<text x="40" y="732" font-size="14" fill="#111">① サーボの電気は、基板の 3.3V や基板の USB からは取らない（口②から別に取る）。② ESP32 の GND と 端子台の GND を必ずつなぐ。</text>
+<text x="40" y="754" font-size="14" fill="#111">③ 電源を入れる前に、赤と黒の取り違い・線の触れ合い（ショート）がないか確認する。</text>
+</svg>

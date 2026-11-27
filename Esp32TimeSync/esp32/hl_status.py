@@ -123,7 +123,7 @@ class HuskyStatus:
                  settle_ms=2000, max_miss=5, knock_settle_ms=4000,
                  auto_photo=True, photo_cooldown_ms=10000, photo_max=50, photo_res=1,
                  auto_enroll=True, enroll_max=8, enroll_cooldown_ms=10000, enroll_stable=3,
-                 hold_polls=2):
+                 hold_polls=2, photo_per_visit=0, absent_reset_ms=5000):
         self.i2c = i2c
         self.state = NO_DRIVER if (hl is None or i2c is None) else NOT_FOUND
         self.algo = algo if algo is not None else (hl.ALGO_FACE_RECOGNITION if hl else 0)
@@ -162,6 +162,12 @@ class HuskyStatus:
         # 写真を撮る「直前」に呼ばれる関数。撮影の間は画面の更新が止まるので、先に「SHOOT」を描く。
         self.shoot_cb = None
         self._last_photo_ms = None
+        # 「居続ける間は、間隔をあけて、1回の滞在につき N 枚まで」の撮り方(photo_per_visit が 1 以上のとき)。
+        # 見えなくなって absent_reset_ms 以上たつと、滞在が終わったとみなし、次に見えたとき、すぐ撮り直せる。
+        self.photo_per_visit = photo_per_visit
+        self.absent_reset_ms = absent_reset_ms
+        self.visit_photos = 0  # 今の滞在で撮った枚数
+        self._last_seen_ms = None
         # 知らない顔(ID 0)が、画面の中央にじっといたら、自動で覚えさせる(ID01, ID02 … の順)
         self.auto_enroll = auto_enroll
         self.enroll_max = enroll_max  # 電源を入れてから、自動で覚えさせる人数の上限
@@ -271,6 +277,13 @@ class HuskyStatus:
                     self.first = main_result(rs)
                 if self.new_id and ticks_diff(now, self._new_until) >= 0:
                     self.new_id = 0
+                if self.faces > 0:
+                    self._last_seen_ms = now
+                elif self._last_seen_ms is not None and ticks_diff(now, self._last_seen_ms) >= self.absent_reset_ms:
+                    # 見えなくなって十分たった = 滞在の終わり。次に見えたら、最初の1枚をすぐ撮れるようにする
+                    self._last_seen_ms = None
+                    self.visit_photos = 0
+                    self._last_photo_ms = None
                 if self.faces > 0 and not self.holding:  # 本当に見えているときだけ、写真を撮る
                     self._maybe_take_photo(now)
                 if not self.holding:
@@ -366,6 +379,8 @@ class HuskyStatus:
     def _maybe_take_photo(self, now):
         if not self.auto_photo or self.photos >= self.photo_max:
             return
+        if self.photo_per_visit > 0 and self.visit_photos >= self.photo_per_visit:
+            return  # 今の滞在では、もう、決めた枚数を撮った
         if self._last_photo_ms is not None and ticks_diff(now, self._last_photo_ms) < self.photo_cooldown_ms:
             return
         self._last_photo_ms = now  # 失敗しても、すぐには撮り直さない
@@ -382,6 +397,7 @@ class HuskyStatus:
             name = ""
         if name:
             self.photos += 1
+            self.visit_photos += 1
             self.last_photo = name
             self.photo_fail = False
         else:

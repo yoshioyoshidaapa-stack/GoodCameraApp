@@ -153,6 +153,11 @@ def make_husky(mode="face"):
     algo, target = hl_status.mode_settings(mode)
     # 結果を読む間隔(ミリ秒)。小さいほど動きが滑らか。遅いと感じたら小さく、不安定なら大きくする。
     # 間隔を短くした分、「見失っても枠を残す回数」と「接続切れとみなす連続失敗回数」を増やして、時間は同じくらいに保つ。
+    if mode == "bird":
+        # 鳥: 居続ける間は 30 秒ごとに撮り、1回の滞在で 10 枚まで。5 秒見えなければ滞在は終わり。合計の上限は 1000 枚。
+        return hl_status.HuskyStatus(i2c, algo=algo, target=target, poll_ms=100, hold_polls=8, max_miss=20,
+                                     photo_cooldown_ms=30000, photo_per_visit=10, absent_reset_ms=5000,
+                                     photo_max=1000)
     return hl_status.HuskyStatus(i2c, algo=algo, target=target, poll_ms=100, hold_polls=8, max_miss=20)
 
 

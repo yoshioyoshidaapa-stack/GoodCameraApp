@@ -1020,6 +1020,33 @@ def test_no_photo_while_holding_old_boxes():
     assert s.holding and bus.photo_requests == 1, "前の枠を、残しているだけの間は、写真を撮らない"
 
 
+def test_photo_per_visit_limit_and_reset_after_absence():
+    bus, s = _bird_status([BIRDS_JP[0]], hold_polls=0, auto_photo=True, photo_cooldown_ms=30000,
+                          photo_per_visit=3, absent_reset_ms=5000)
+    for t in (0, 0, 0):
+        s.update(t)
+    assert bus.photo_requests == 1, "見えた最初の1枚は、すぐ撮る"
+    for t in range(1000, 29000, 1000):
+        s.update(t)
+    assert bus.photo_requests == 1, "30秒たつまでは、撮らない"
+    for t in range(29000, 91000, 1000):
+        s.update(t)
+    assert bus.photo_requests == 3, "居続けても、1回の滞在は3枚まで(30秒ごと)"
+    bus.objects = []
+    s.update(91000)
+    s.update(93000)
+    bus.objects = [BIRDS_JP[0]]
+    s.update(94000)
+    assert bus.photo_requests == 3, "見えなくなって5秒たたないうちに戻ったら、同じ滞在のまま(撮らない)"
+    bus.objects = []
+    s.update(95000)
+    s.update(100500)
+    s.update(101000)
+    bus.objects = [BIRDS_JP[0]]
+    s.update(102000)
+    assert bus.photo_requests == 4, "5秒以上見えなくなったあとに戻ったら、すぐ1枚撮る"
+
+
 def test_set_algo_clears_held_boxes():
     bus, s = _bird_status([BIRDS_JP[0]], hold_polls=2)
     for t in (0, 0, 0):

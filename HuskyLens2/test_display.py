@@ -122,7 +122,7 @@ class _Stop(Exception):
     pass
 
 
-def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, frame_ends=None, mode="face"):
+def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, frame_ends=None, mode="face", sonar_us=-2):
     """main.py を、ニセの部品で、loops 回だけ動かして、描いた内容を返す。"""
     import tempfile
     workdir = tempfile.mkdtemp()  # mode.txt を、試験ごとに、独立させる
@@ -163,6 +163,7 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, f
     mach.RTC = FakeRTC
     class FakePin:
         IN = 0
+        OUT = 1
         PULL_UP = 2
         OPEN_DRAIN = 7
 
@@ -187,6 +188,7 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, f
             pass
 
     mach.PWM = FakePWM
+    mach.time_pulse_us = lambda pin, level, timeout: sonar_us  # 距離センサーの返事の長さ(マイクロ秒)。-2 = 返事なし
     mach.I2C = lambda *a, **k: bus
 
     saved_mods = {k: sys.modules.get(k) for k in ("bluetooth", "machine", "lcd", "hl_status")}
@@ -884,11 +886,11 @@ def _yellow_rects(fake):
 def test_bird_screen_shows_count_and_position():
     bus, fake = _bird_run(BIRDS)
     check_layout(fake)
-    assert last_text_at(fake, 164, 8) == "BIRD"
-    assert last_text_at(fake, 164, 28) == "x2"
-    assert last_text_at(fake, 164, 56) == "60%", "いちばん大きい鳥の自信"
-    assert last_text_at(fake, 164, 78) == "x500 y300"
-    assert last_text_at(fake, 164, 102) == "bird,pers"
+    assert last_text_at(fake, 164, 4) == "BIRD"
+    assert last_text_at(fake, 164, 22) == "x2"
+    assert last_text_at(fake, 164, 48) == "60%", "いちばん大きい鳥の自信"
+    assert last_text_at(fake, 164, 66) == "x500 y300"
+    assert last_text_at(fake, 164, 86) == "bird,pers"
     # 地図に、鳥の黄色い枠が、描かれている(例: 鳥 x500,y300 -> 地図の中心 (125, 83))
     near = [e for e in _yellow_rects(fake) if 100 <= e[1] <= 150 and 60 <= e[2] <= 100]
     assert near, "鳥の位置に、黄色い枠がない"
@@ -900,8 +902,8 @@ def test_bird_screen_shows_count_and_position():
 def test_bird_screen_with_no_bird():
     bus, fake = _bird_run([BIRDS[1]])
     check_layout(fake)
-    assert last_text_at(fake, 164, 28) == "x0"
-    assert last_text_at(fake, 164, 56) == "" and last_text_at(fake, 164, 78) == ""
+    assert last_text_at(fake, 164, 22) == "x0"
+    assert last_text_at(fake, 164, 48) == "" and last_text_at(fake, 164, 66) == ""
     assert not _yellow_rects(fake), "鳥がいないときは、枠を描かない"
 
 
@@ -924,7 +926,7 @@ def test_bird_screen_shows_shoot_before_photo():
 def test_default_mode_is_bird_when_no_file():
     bus = FakeBus(present=True)
     fake = run_main(bus, loops=140, mode=None)
-    assert last_text_at(fake, 164, 8) == "BIRD"
+    assert last_text_at(fake, 164, 4) == "BIRD"
 
 
 def test_boot_very_long_press_switches_mode_and_saves_it():
@@ -1070,14 +1072,40 @@ def test_set_algo_clears_held_boxes():
 def test_bird_screen_with_japanese_names():
     bus, fake = _bird_run(BIRDS_JP)
     check_layout(fake)
-    assert last_text_at(fake, 164, 28) == "x2"
-    assert last_text_at(fake, 164, 102) == "bird,pers", "日本語の名前は、英語に直して出す"
+    assert last_text_at(fake, 164, 22) == "x2"
+    assert last_text_at(fake, 164, 86) == "bird,pers", "日本語の名前は、英語に直して出す"
 
 
 def test_bird_screen_shows_drive_off_at_start():
     bus, fake = _bird_run(BIRDS)
     check_layout(fake)
-    assert last_text_at(fake, 164, 114) == "DR:OFF", "電源を入れた直後は、走行は切"
+    assert last_text_at(fake, 164, 96) == "DR:OFF", "電源を入れた直後は、走行は切"
+
+
+def test_bird_screen_shows_servo_and_sensor_state():
+    bus, fake = _bird_run(BIRDS)
+    check_layout(fake)
+    assert last_text_at(fake, 164, 96) == "DR:OFF"
+    assert last_text_at(fake, 164, 106) == "L:OFF" and last_text_at(fake, 164, 116) == "R:OFF", "走行が切のときは、両方 OFF"
+    assert last_text_at(fake, 164, 126) == "D:  ---", "返事がなければ、---(遠い)"
+    bus, fake = _bird_run(BIRDS, sonar_us=1160)  # 1160 マイクロ秒 = 20 cm
+    check_layout(fake)
+    assert last_text_at(fake, 164, 126) == "D: 20cm", last_text_at(fake, 164, 126)
+    red = [t for t in fake.texts if t[1] == 164 and t[2] == 126 and t[0].startswith("D: 20")]
+    assert red and red[-1][3] == 0xF800, "近い(止まる距離より近い)ときは赤"
+    bus, fake = _bird_run(BIRDS, sonar_us=11600)  # 200 cm
+    assert last_text_at(fake, 164, 126) == "D:200cm"
+
+
+def test_bird_screen_shows_servo_state_when_driving():
+    center = [("bird", 0, 320, 240, 50, 50, 0.8)]
+    bus, fake = _bird_run(center, loops=200, boot_pattern=[0] * 22 + [1] * 5)  # BOOT を 2秒ほど押して、走行を入れる
+    check_layout(fake)
+    assert last_text_at(fake, 164, 96) == "DR:ON FWD", last_text_at(fake, 164, 96)
+    assert last_text_at(fake, 164, 106) == "L:FWD" and last_text_at(fake, 164, 116) == "R:FWD"
+    left = [("bird", 0, 60, 240, 50, 50, 0.8)]
+    bus, fake = _bird_run(left, loops=200, boot_pattern=[0] * 22 + [1] * 5)
+    assert last_text_at(fake, 164, 106) == "L:BCK" and last_text_at(fake, 164, 116) == "R:FWD", "左に回る: 左は後ろ、右は前"
 
 
 def test_no_micropython_incompatible_calls():

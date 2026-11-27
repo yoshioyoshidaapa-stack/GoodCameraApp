@@ -297,20 +297,38 @@ def main():
             c = first["conf"]
             conf = "%d%%" % int(c * 100 if c <= 1 else c)
             pos = "x%d y%d" % (first["x"], first["y"])
-        row("b_title", "BIRD", 8, lcd.CYAN, 2, 164, 76)
-        row("b_count", pad("x%d" % n, 3), 28, lcd.YELLOW if (n and not held) else GRAY, 3, 164, 76)
-        row("b_conf", pad(conf, 4), 56, lcd.WHITE, 2, 164, 76)
-        row("b_pos", pad(pos, 9), 78, lcd.WHITE, 1, 164, 76)
-        row("b_photo", pad("PH:%s %d" % ("ON" if husky.auto_photo else "OFF", husky.photos), 9), 90, lcd.YELLOW, 1, 164, 76)
-        row("b_seen", pad(husky.seen, 9), 102, lcd.GREEN, 1, 164, 76)
+        row("b_title", "BIRD", 4, lcd.CYAN, 2, 164, 76)
+        row("b_count", pad("x%d" % n, 3), 22, lcd.YELLOW if (n and not held) else GRAY, 3, 164, 76)
+        row("b_conf", pad(conf, 4), 48, lcd.WHITE, 2, 164, 76)
+        row("b_pos", pad(pos, 9), 66, lcd.WHITE, 1, 164, 76)
+        row("b_photo", pad("PH:%s %d" % ("ON" if husky.auto_photo else "OFF", husky.photos), 9), 76, lcd.YELLOW, 1, 164, 76)
+        row("b_seen", pad(husky.seen, 9), 86, lcd.GREEN, 1, 164, 76)
         if drive is not None:  # 走行の状態: DR:OFF(動かない) / DR:ON FWD(前進) LFT(左) RGT(右) STP(停止)
             short = {"forward": "FWD", "back": "BCK", "left": "LFT", "right": "RGT"}.get(drive.cmd, "STP")
             if planner.avoiding:
                 short = "AVD"  # 壁をよけている
             elif planner.scouting:
                 short = "S-" + short[0]  # 偵察中(探して回っている): S-L / S-R / S-F / S-S(止まって見ている)
-            row("b_ble", pad("DR:ON " + short if drive.enabled else "DR:OFF", 9), 114,
+            row("b_ble", pad("DR:ON " + short if drive.enabled else "DR:OFF", 9), 96,
                 lcd.RED if drive.enabled else GRAY, 1, 164, 76)
+            # 左(L)・右(R)のサーボの状態: FWD=前に回す / BCK=後ろに回す / STP=止まっている / OFF=走行が切
+            for side, name, ykey, yy in ((0, "L", "b_l", 106), (1, "R", "b_r", 116)):
+                if not drive.enabled:
+                    txt, col = "OFF", GRAY
+                else:
+                    sg = drive_mod.wheel_signs(drive.cmd)[side]
+                    txt, col = ("FWD", lcd.GREEN) if sg > 0 else (("BCK", lcd.YELLOW) if sg < 0 else ("STP", GRAY))
+                row(ykey, pad(name + ":" + txt, 9), yy, col, 1, 164, 76)
+            # 前方の距離センサー(センチ)。近い(止まる距離より近い)と赤
+            dist = state.get("dist")
+            if sonar is None:
+                dtxt, dcol = "D:NO SNS", GRAY
+            elif dist is None:
+                dtxt, dcol = "D:  ---", lcd.GREEN
+            else:
+                dtxt = "D:%3dcm" % int(dist)
+                dcol = lcd.RED if dist < drive_mod.STOP_CM else lcd.GREEN
+            row("b_d", pad(dtxt, 9), 126, dcol, 1, 164, 76)
         else:
             row("b_ble", pad("BLE ok" if clock.conn is not None else "BLE ..", 9), 114, lcd.GREEN, 1, 164, 76)
 
@@ -389,7 +407,8 @@ def main():
                     husky.toggle_photo()
         if drive is not None:
             if state["mode"] == "bird":
-                dist = sonar.measure() if (sonar is not None and drive.enabled) else None
+                dist = sonar.measure() if sonar is not None else None  # 走行が切でも測る(画面で、センサーの値を見られるように)
+                state["dist"] = dist
                 drive.command(planner.update(husky, time.ticks_ms(), drive.cmd, dist))
             else:
                 drive.stop()

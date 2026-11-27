@@ -1,0 +1,80 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>3Dプリント用 部品寸法メモ</title>
+<style>
+body{font-family:"Noto Sans CJK JP","WenQuanYi Zen Hei","Hiragino Sans","Yu Gothic",sans-serif;margin:24px;color:#111;font-size:13px;line-height:1.5}
+h1{font-size:22px;margin:0 0 4px} h2{font-size:16px;border-left:6px solid #357;padding-left:8px;margin:20px 0 6px}
+table{border-collapse:collapse;width:100%;margin-bottom:6px} th,td{border:1px solid #889;padding:5px 7px;vertical-align:top} th{background:#e8eef8;text-align:left}
+.ok{color:#064;font-weight:bold}.ng{color:#b00;font-weight:bold}.mid{color:#a60;font-weight:bold}.blank{background:#fffbe0;min-width:90px}
+.note{background:#fff4f4;border:1px solid #c88;padding:6px 10px;margin:8px 0} ul{margin:4px 0 4px 18px;padding:0}
+@page{size:A4;margin:12mm}
+</style></head><body>
+<h1>3Dプリント用 部品寸法メモ</h1>
+<div>クローラー（鳥を追うロボット）の車体を設計するための、部品のサイズ表です。</div>
+<div class="note"><b>最初に読んでください：</b>数字には「確かさ」をつけました。<span class="ok">◎ 公式の表記</span> / <span class="mid">○ 販売店などの目安（個体差あり）</span> / <span class="ng">× 分からなかった（実測が必要）</span>。<br>
+<b>3Dプリントで型紙を作る前に、手元の実物をノギス（なければ定規）で測って、黄色い欄に書き込んでください。</b>私が実物のサイズを知っているわけではないので、数字をそのまま信じて設計しないでください。</div>
+
+<h2>1. HuskyLens2（カメラ）</h2>
+<table><tr><th>項目</th><th>値</th><th>確かさ</th><th class="blank">実測</th></tr>
+<tr><td>外形（縦×横×厚み）</td><td>70 × 58 × 19 mm</td><td class="ok">◎ DFRobot の商品ページ・Wiki</td><td class="blank"></td></tr>
+<tr><td>重さ</td><td>約 90 g（箱なし）</td><td class="ok">◎ DFRobot</td><td class="blank"></td></tr>
+<tr><td>付属の固定部品</td><td>M3ネジ ×6、M3ナット ×6、取り付け金具 ×1、かさ上げ金具 ×1</td><td class="ok">◎ DFRobot（同梱品）</td><td class="blank"></td></tr>
+<tr><td>固定の穴の位置・直径</td><td>見つからなかった</td><td class="ng">×</td><td class="blank">穴の間隔：　　　mm　直径：　　mm</td></tr>
+<tr><td>レンズの位置（端から）</td><td>見つからなかった</td><td class="ng">×</td><td class="blank">　　　mm（中心の高さも）</td></tr>
+<tr><td>ケーブルの出口の位置</td><td>見つからなかった</td><td class="ng">×</td><td class="blank"></td></tr></table>
+<div>設計のヒント：付属の「取り付け金具」を使うと、穴の位置を新しく測る手間が減ります。金具を車体に固定する形にするのが、いちばん簡単です。</div>
+
+<h2>2. サーボ SG90-HV（連続回転タイプ ×2）</h2>
+<table><tr><th>項目</th><th>値</th><th>確かさ</th><th class="blank">実測</th></tr>
+<tr><td>本体（長さ×幅×高さ）</td><td>約 23 × 12 × 26 mm</td><td class="mid">○ 販売店の例（SG90連続回転品）</td><td class="blank"></td></tr>
+<tr><td>軸を含む高さ</td><td>約 32 mm</td><td class="mid">○</td><td class="blank"></td></tr>
+<tr><td>耳（固定用の出っ張り）を含む長さ</td><td>約 32 mm</td><td class="mid">○</td><td class="blank"></td></tr>
+<tr><td>固定の穴の間隔・直径</td><td>見つからなかった</td><td class="ng">×</td><td class="blank">間隔：　　　mm　直径：　　mm</td></tr>
+<tr><td>出力軸の位置（本体の端から）</td><td>見つからなかった</td><td class="ng">×</td><td class="blank">　　　mm</td></tr>
+<tr><td>軸（スプライン）の形</td><td>付属の樹脂ホーン（腕）を使う想定</td><td class="mid">○</td><td class="blank">ホーンの直径：　　mm</td></tr>
+<tr><td>リード線（3本）の出口と長さ</td><td>見つからなかった</td><td class="ng">×</td><td class="blank"></td></tr></table>
+<div>※ 「SG90-HV」の商品ページは、私は読めていません。上の数字は、一般的な SG90 の連続回転品のものです。HV 版と違う可能性があります。</div>
+
+<h2>3. ESP32 基板（ideaspark 1.14インチ 液晶つき）</h2>
+<table><tr><th>項目</th><th>値</th><th>確かさ</th><th class="blank">実測</th></tr>
+<tr><td>基板の外形（縦×横）</td><td>分からなかった</td><td class="ng">×</td><td class="blank">　　　× 　　　mm</td></tr>
+<tr><td>液晶を含む高さ（厚み）</td><td>分からなかった</td><td class="ng">×</td><td class="blank">　　　mm</td></tr>
+<tr><td>液晶の見える範囲（窓の大きさ）</td><td>1.14インチ（画素 240×135）</td><td class="mid">○ 製品仕様</td><td class="blank">窓：　　×　　mm</td></tr>
+<tr><td>USB-C の口の位置と高さ</td><td>分からなかった</td><td class="ng">×</td><td class="blank">どの辺：　　　端から　　mm</td></tr>
+<tr><td>BOOT ボタン・EN ボタンの位置</td><td>分からなかった</td><td class="ng">×</td><td class="blank">窓から指が届くか？</td></tr>
+<tr><td>固定の穴</td><td>ないかもしれない</td><td class="ng">×</td><td class="blank"></td></tr></table>
+<div>設計のヒント：穴がない基板は、「枠で挟む」か「ピンの隙間に爪を引っかける」形にします。ボタン（BOOT）を押せる穴または窓を、必ず作ってください（走行の入り切りに使います）。</div>
+
+<h2>4. そのほかの部品</h2>
+<table><tr><th>部品</th><th>値</th><th>確かさ</th><th class="blank">実測</th></tr>
+<tr><td>コンデンサ（16V 1000µF）</td><td>直径 約10 × 高さ 約17 mm（商品名にある寸法の例）</td><td class="mid">○ 商品ページの表記</td><td class="blank">買った品：　　×　　mm</td></tr>
+<tr><td>モバイルバッテリー</td><td>機種で全く違う</td><td class="ng">×</td><td class="blank">縦　　×　横　　×　厚み　　mm</td></tr>
+<tr><td>USB 端子台（USB-Aオス型）</td><td>買う商品で違う</td><td class="ng">×</td><td class="blank">縦　　×　横　　×　厚み　　mm</td></tr>
+<tr><td>HuskyLens2 の電源ボード</td><td>分からなかった</td><td class="ng">×</td><td class="blank">縦　　×　横　　×　厚み　　mm</td></tr>
+<tr><td>ケーブル（USB ほか）の曲がる半径</td><td>—</td><td class="ng">×</td><td class="blank">出口の向きを決める</td></tr></table>
+
+<h2>5. 設計に入れてほしいこと（チェック表）</h2>
+<ul>
+<li>□ カメラは、車体の<b>前の真ん中</b>に、前向きで固定する（左右にずれると「中央」の判定がずれる）</li>
+<li>□ カメラの前に、車体やケーブルが写り込まない</li>
+<li>□ 液晶の<b>窓</b>と、<b>BOOT ボタン</b>を押す穴（上から見える位置）</li>
+<li>□ ESP32 の USB-C に、ケーブルが届く穴</li>
+<li>□ 左右のサーボは、<b>車体の中心線に対して左右対称</b>に置く（まっすぐ進むため）</li>
+<li>□ バッテリーは、<b>低く、真ん中寄り</b>に置いて、ひっくり返りにくくする</li>
+<li>□ コンデンサ・端子台の置き場（ぶらぶらしない）</li>
+<li>□ 線がキャタピラに巻き込まれない通り道</li>
+<li>□ 電源が切れたときに止まるよう、サーボの線が抜けにくい</li>
+<li>□ ベランダでの雨・日差し対策（雨の日は走らせない）</li></ul>
+
+<h2>6. 3Dプリントの一般的な目安（部品を入れる穴の大きさ）</h2>
+<ul>
+<li>部品を入れる穴は、部品より<b>0.3〜0.5 mm 大きめ</b>にします（プリンタの癖で、ぴったりだと入らないことが多い）。</li>
+<li>M3 ネジを通す穴は、直径 <b>3.2〜3.4 mm</b>、ねじ山を立てる下穴は <b>2.5〜2.8 mm</b> が目安です。</li>
+<li>これらは一般的な目安で、お持ちのプリンタ・材料で違います。小さい試し打ち（穴だけ）を先にすると、失敗が減ります。</li></ul>
+
+<h2>7. 測り方（初めての方へ）</h2>
+<ul>
+<li>ノギスがあれば、それが正確です。なければ、定規とスマホの写真（定規を横に置いて撮る）でも、だいたい分かります。</li>
+<li>測る場所は、<b>いちばん大きい（出っ張った）ところ</b>です。ケーブルの出口や、ネジ穴の位置も忘れずに。</li>
+<li>測った数字を、表の黄色い欄に書いて、写真に撮って送ってください。私が設計の数字をまとめ直します。</li></ul>
+
+<div style="margin-top:14px;font-size:11px;color:#556">出典：DFRobot（HuskyLens2 の寸法・同梱品）、販売店の商品説明・データシート（SG90 の本体寸法）。ほかは私の一般知識。</div>
+</body></html>

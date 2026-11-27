@@ -12,6 +12,18 @@ INVERT_RIGHT = True  # 右のサーボは、向きが左右反対につくので
 IMG_W = 640
 CENTER_BAND = 100  # 中央から、左右にこの幅(ピクセル)の中なら「中央」(220〜420)
 NEAR_W = 320  # 鳥の枠の幅がこれ以上なら、近いので止まる
+# 偵察(鳥が画面にいないとき、探して回る)。時間はミリ秒。実物に合わせて直す。
+LOST_MS = 3000  # 鳥を見失ってから、この時間は、止まって待つ(すぐ探しに行かない)
+TURN_MS = 500  # 探すとき、1回に回る時間
+LOOK_MS = 1200  # 回ったあと、止まって見る時間(動いている間は、画像がぶれて、見つかりにくい)
+STEPS_PER_TURN = 12  # 「回る→見る」を、この回数やったら(だいたい1周)、少し前進する
+FORWARD_MS = 2000  # 1周しても見つからないとき、前進する時間
+
+try:
+    from time import ticks_diff
+except ImportError:  # パソコンの Python で試験するとき
+    def ticks_diff(a, b):
+        return a - b
 
 
 def decide(x, w=0, img_w=IMG_W, band=CENTER_BAND, near_w=NEAR_W):
@@ -88,15 +100,77 @@ class Drive:
         return self.enabled
 
 
-def plan(husky, current):
-    """HuskyStatus の今の状態から、動きを決める。
-    読み取りが成功している間は、鳥の位置で決める。検出が一瞬途切れて枠を残している間(holding)は、今の動きを続ける。
-    それ以外(つながっていない・読めない・鳥がいない)は、止まる。"""
-    if husky is None or not husky.is_ready():
-        return "stop"
+def _track(husky, current):
+    """鳥が見えているときの動き。検出が一瞬途切れて枠を残している間(holding)は、今の動きを続ける。"""
     if husky.holding:
         return current
     first = husky.first
     if husky.faces <= 0 or first is None:
-        return "stop"
+        return None  # 鳥はいない
     return decide(first["x"], first["w"])
+
+
+class Planner:
+    """見えているときは追いかけ、見えなくなったら、しばらく待ってから、回って探す(偵察)。"""
+
+    def __init__(self, lost_ms=LOST_MS, turn_ms=TURN_MS, look_ms=LOOK_MS, steps=STEPS_PER_TURN,
+                 forward_ms=FORWARD_MS, img_w=IMG_W):
+        self.lost_ms = lost_ms
+        self.turn_ms = turn_ms
+        self.look_ms = look_ms
+        self.steps = steps
+        self.forward_ms = forward_ms
+        self.img_w = img_w
+        self.reset(0)
+
+    def reset(self, now):
+        self.last_seen = now  # 見失った(または、探し始めた)時刻
+        self.side = 1  # 探すときに回る向き: 1 = 右 / -1 = 左(最後に鳥が見えた側を向く)
+        self.scouting = False
+        self.phase = "turn"
+        self.phase_start = now
+        self.step_n = 0
+
+    def update(self, husky, now, current):
+        """いまの動き ('forward' / 'left' / 'right' / 'stop') を返す。"""
+        if husky is None or not husky.is_ready():
+            self.reset(now)  # つながっていない間は止まる。つながったら、待ってから探し始める
+            return "stop"
+        cmd = _track(husky, current)
+        if cmd is not None:  # 鳥が見えている
+            self.last_seen = now
+            self.scouting = False
+            first = husky.first
+            if first is not None:
+                self.side = 1 if first["x"] >= self.img_w // 2 else -1
+            return cmd
+        if ticks_diff(now, self.last_seen) < self.lost_ms:
+            return "stop"  # 見失った直後は、止まって待つ
+        if not self.scouting:
+            self.scouting = True
+            self.phase = "turn"
+            self.phase_start = now
+            self.step_n = 0
+        elapsed = ticks_diff(now, self.phase_start)
+        if self.phase == "turn":
+            if elapsed >= self.turn_ms:
+                self.phase = "look"
+                self.phase_start = now
+                return "stop"
+            return "right" if self.side > 0 else "left"
+        if self.phase == "look":
+            if elapsed >= self.look_ms:
+                self.step_n += 1
+                self.phase_start = now
+                if self.step_n >= self.steps:
+                    self.phase = "forward"
+                    self.step_n = 0
+                    return "forward"
+                self.phase = "turn"
+                return "right" if self.side > 0 else "left"
+            return "stop"
+        if elapsed >= self.forward_ms:  # forward
+            self.phase = "turn"
+            self.phase_start = now
+            return "right" if self.side > 0 else "left"
+        return "forward"

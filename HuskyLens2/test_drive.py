@@ -82,15 +82,61 @@ def test_drive_commands_and_safety():
     assert L.duty == 0 and R.duty == 0
 
 
-def test_plan():
-    assert drive.plan(None, "forward") == "stop"
-    assert drive.plan(FakeHusky(ready=False), "forward") == "stop", "つながっていないときは止まる"
-    assert drive.plan(FakeHusky(faces=0), "forward") == "stop", "鳥がいないときは止まる"
-    assert drive.plan(FakeHusky(x=320), "stop") == "forward"
-    assert drive.plan(FakeHusky(x=100), "stop") == "left"
-    assert drive.plan(FakeHusky(x=600), "stop") == "right"
-    assert drive.plan(FakeHusky(x=600, w=400), "stop") == "stop", "近いので止まる"
-    assert drive.plan(FakeHusky(holding=True, x=100), "right") == "right", "検出が途切れた間は、今の動きを続ける"
+def test_track_when_bird_visible():
+    pl = drive.Planner()
+    assert pl.update(None, 0, "stop") == "stop"
+    assert pl.update(FakeHusky(ready=False), 0, "forward") == "stop", "つながっていないときは止まる"
+    assert pl.update(FakeHusky(x=320), 0, "stop") == "forward"
+    assert pl.update(FakeHusky(x=100), 0, "stop") == "left"
+    assert pl.update(FakeHusky(x=600), 0, "stop") == "right"
+    assert pl.update(FakeHusky(x=600, w=400), 0, "stop") == "stop", "近いので止まる"
+    assert pl.update(FakeHusky(holding=True, x=100), 0, "right") == "right", "検出が途切れた間は、今の動きを続ける"
+    assert not pl.scouting
+
+
+def test_wait_then_scout_after_losing_bird():
+    pl = drive.Planner(lost_ms=3000, turn_ms=500, look_ms=1000, steps=3, forward_ms=2000)
+    pl.update(FakeHusky(x=600), 0, "stop")  # 右寄りに見えていた
+    none = FakeHusky(faces=0)
+    assert pl.update(none, 100, "stop") == "stop", "見失った直後は、止まって待つ"
+    assert pl.update(none, 2900, "stop") == "stop"
+    assert not pl.scouting
+    assert pl.update(none, 3000, "stop") == "right", "待ったあと、最後に見えた側(右)へ回り始める"
+    assert pl.scouting
+    assert pl.update(none, 3400, "right") == "right"
+    assert pl.update(none, 3500, "right") == "stop", "回ったら、止まって見る"
+    assert pl.update(none, 4400, "stop") == "stop"
+    assert pl.update(none, 4500, "stop") == "right", "見終わったら、また回る"
+    t = 4500
+    out = []
+    for _ in range(80):  # 回る→見る を繰り返す: 3回目の見終わりで前進
+        t += 100
+        out.append(pl.update(none, t, "x"))
+    assert "forward" in out, "1周しても見つからなければ、前進する"
+    k = out.index("forward")
+    assert "left" not in out, "回る向きは、変わらない"
+    assert out[k:k + 19].count("forward") >= 18, "前進は、決めた時間(2秒)続く"
+
+
+def test_bird_found_while_scouting_returns_to_tracking():
+    pl = drive.Planner(lost_ms=1000, turn_ms=500, look_ms=1000, steps=3, forward_ms=2000)
+    pl.update(FakeHusky(x=100), 0, "stop")
+    none = FakeHusky(faces=0)
+    assert pl.update(none, 1000, "stop") == "left", "最後に左寄りで見えたので、左へ回る"
+    assert pl.scouting
+    assert pl.update(FakeHusky(x=330), 1100, "left") == "forward", "見つけたら、すぐ追いかける"
+    assert not pl.scouting
+    assert pl.update(none, 1200, "forward") == "stop", "また見失ったら、待つところから"
+
+
+def test_scouting_stops_when_not_connected():
+    pl = drive.Planner(lost_ms=1000)
+    none = FakeHusky(faces=0)
+    pl.update(none, 0, "stop")
+    assert pl.update(none, 1000, "stop") == "right"
+    assert pl.update(FakeHusky(ready=False), 1100, "right") == "stop"
+    assert not pl.scouting
+    assert pl.update(none, 1200, "stop") == "stop", "つながり直したら、また待ってから探す"
 
 
 if __name__ == "__main__":

@@ -305,6 +305,8 @@ def main():
         row("b_seen", pad(husky.seen, 9), 102, lcd.GREEN, 1, 164, 76)
         if drive is not None:  # 走行の状態: DR:OFF(動かない) / DR:ON FWD(前進) LFT(左) RGT(右) STP(停止)
             short = {"forward": "FWD", "left": "LFT", "right": "RGT"}.get(drive.cmd, "STP")
+            if planner.scouting:
+                short = "S-" + short[0]  # 偵察中(探して回っている): S-L / S-R / S-F / S-S(止まって見ている)
             row("b_ble", pad("DR:ON " + short if drive.enabled else "DR:OFF", 9), 114,
                 lcd.RED if drive.enabled else GRAY, 1, 164, 76)
         else:
@@ -329,6 +331,7 @@ def main():
         cache.clear()
 
     drive = None
+    planner = None
     if drive_mod is not None:
         try:
             def _pwm(pin):
@@ -336,6 +339,7 @@ def main():
                 p.duty_u16(0)
                 return p
             drive = drive_mod.Drive(_pwm)
+            planner = drive_mod.Planner()
         except Exception:
             drive = None  # サーボが使えなくても、画面は動かす
 
@@ -366,16 +370,18 @@ def main():
                     switch_mode()
                 elif held >= 1500:
                     if drive is not None and state["mode"] == "bird":
-                        drive.toggle()  # 鳥モードでは、走行の入り切り(顔モードでは、自動登録の入り切り)
+                        if drive.toggle():  # 鳥モードでは、走行の入り切り(顔モードでは、自動登録の入り切り)
+                            planner.reset(time.ticks_ms())  # 入れたら、見失った状態から数え直す
                     else:
                         husky.toggle_enroll()
                 elif held >= 30:
                     husky.toggle_photo()
         if drive is not None:
             if state["mode"] == "bird":
-                drive.command(drive_mod.plan(husky, drive.cmd))
+                drive.command(planner.update(husky, time.ticks_ms(), drive.cmd))
             else:
                 drive.stop()
+                planner.reset(time.ticks_ms())
         draw()
         time.sleep_ms(100)
 

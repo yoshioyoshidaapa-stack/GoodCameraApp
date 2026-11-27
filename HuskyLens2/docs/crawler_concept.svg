@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" font-family="Noto Sans CJK JP, WenQuanYi Zen Hei, Hiragino Sans, Yu Gothic, sans-serif">
+<defs>
+  <pattern id="tread" width="14" height="14" patternUnits="userSpaceOnUse"><rect width="14" height="14" fill="#3a3a3a"/><rect y="0" width="14" height="5" fill="#222"/></pattern>
+  <pattern id="treadH" width="14" height="14" patternUnits="userSpaceOnUse"><rect width="14" height="14" fill="#3a3a3a"/><rect x="0" width="5" height="14" fill="#222"/></pattern>
+  <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#c33"/></marker>
+</defs>
+<rect width="1200" height="800" fill="#f6f9fc"/>
+<text x="600" y="38" font-size="26" font-weight="bold" text-anchor="middle" fill="#123">完成イメージ：鳥を探して追いかけるクローラー</text>
+<text x="600" y="62" font-size="14" text-anchor="middle" fill="#a00">※ イメージ図です。実物の形や大きさ、部品の位置は、3Dプリントの設計で決まります</text>
+
+<!-- TOP VIEW -->
+<rect x="30" y="85" width="520" height="400" rx="12" fill="#ffffff" stroke="#9ab" stroke-width="2"/>
+<text x="290" y="112" font-size="18" font-weight="bold" text-anchor="middle" fill="#123">上から見た図</text>
+<text x="290" y="132" font-size="12" text-anchor="middle" fill="#567">↑ 進む向き（前）</text>
+<!-- tracks -->
+<rect x="130" y="150" width="60" height="290" rx="26" fill="url(#tread)" stroke="#111" stroke-width="2"/>
+<rect x="390" y="150" width="60" height="290" rx="26" fill="url(#tread)" stroke="#111" stroke-width="2"/>
+<text x="160" y="465" font-size="13" text-anchor="middle" fill="#111">左キャタピラ</text>
+<text x="420" y="465" font-size="13" text-anchor="middle" fill="#111">右キャタピラ</text>
+<!-- body -->
+<rect x="190" y="165" width="200" height="260" rx="14" fill="#dfe9f7" stroke="#357" stroke-width="2"/>
+<text x="290" y="182" font-size="12" text-anchor="middle" fill="#357">3Dプリントの車体</text>
+<!-- servos -->
+<rect x="196" y="360" width="46" height="26" rx="4" fill="#4a8" stroke="#142"/><text x="219" y="378" font-size="11" text-anchor="middle" fill="#fff">左サーボ</text>
+<rect x="338" y="360" width="46" height="26" rx="4" fill="#4a8" stroke="#142"/><text x="361" y="378" font-size="11" text-anchor="middle" fill="#fff">右サーボ</text>
+<line x1="196" y1="373" x2="190" y2="373" stroke="#142" stroke-width="3"/><line x1="384" y1="373" x2="390" y2="373" stroke="#142" stroke-width="3"/>
+<!-- camera -->
+<rect x="235" y="190" width="110" height="46" rx="6" fill="#222" stroke="#000" stroke-width="2"/>
+<circle cx="290" cy="213" r="14" fill="#68b" stroke="#fff" stroke-width="2"/>
+<text x="290" y="256" font-size="12" text-anchor="middle" fill="#111">HuskyLens2（カメラ）</text>
+<!-- esp32 -->
+<rect x="245" y="272" width="90" height="48" rx="4" fill="#1a6" stroke="#043" stroke-width="2"/>
+<rect x="255" y="280" width="46" height="26" fill="#111"/><text x="278" y="298" font-size="9" text-anchor="middle" fill="#6f6">bird x1</text>
+<text x="290" y="338" font-size="12" text-anchor="middle" fill="#111">ESP32 + 小さい画面</text>
+<!-- battery -->
+<rect x="250" y="392" width="80" height="28" rx="5" fill="#f5c45a" stroke="#a60" stroke-width="2"/>
+<text x="290" y="411" font-size="12" text-anchor="middle" fill="#520">バッテリー</text>
+<rect x="345" y="394" width="30" height="14" fill="#a7d" stroke="#406"/><text x="360" y="420" font-size="10" text-anchor="middle" fill="#406">端子台</text>
+<!-- direction arrow -->
+<line x1="290" y1="150" x2="290" y2="138" stroke="#c33" stroke-width="3" marker-end="url(#ar)"/>
+<!-- camera cone -->
+<polygon points="290,200 170,145 410,145" fill="#ffd54f" opacity="0.35"/>
+
+<!-- SIDE VIEW -->
+<rect x="570" y="85" width="600" height="400" rx="12" fill="#ffffff" stroke="#9ab" stroke-width="2"/>
+<text x="870" y="112" font-size="18" font-weight="bold" text-anchor="middle" fill="#123">横から見た図</text>
+<!-- balcony floor -->
+<rect x="585" y="410" width="570" height="12" fill="#b9a98a"/>
+<text x="1130" y="440" font-size="11" text-anchor="end" fill="#765">ベランダの床</text>
+<!-- track -->
+<rect x="640" y="355" width="260" height="55" rx="27" fill="url(#treadH)" stroke="#111" stroke-width="2"/>
+<circle cx="668" cy="383" r="16" fill="#aaa" stroke="#111"/><circle cx="872" cy="383" r="16" fill="#aaa" stroke="#111"/>
+<!-- body -->
+<rect x="650" y="300" width="240" height="60" rx="10" fill="#dfe9f7" stroke="#357" stroke-width="2"/>
+<rect x="840" y="315" width="40" height="24" rx="4" fill="#f5c45a" stroke="#a60"/><text x="860" y="331" font-size="10" text-anchor="middle" fill="#520">電池</text>
+<rect x="745" y="272" width="64" height="28" rx="3" fill="#1a6" stroke="#043"/><text x="777" y="290" font-size="10" text-anchor="middle" fill="#fff">ESP32</text>
+<rect x="665" y="258" width="62" height="42" rx="5" fill="#222" stroke="#000" stroke-width="2"/>
+<circle cx="665" cy="279" r="9" fill="#68b" stroke="#fff" stroke-width="2"/>
+<text x="700" y="248" font-size="12" text-anchor="middle" fill="#111">HuskyLens2</text>
+<text x="777" y="262" font-size="12" text-anchor="middle" fill="#111">基板+画面</text>
+<polygon points="656,279 600,200 600,360" fill="#ffd54f" opacity="0.25"/>
+<!-- bird on perch -->
+<g transform="translate(1020,300)">
+  <ellipse cx="0" cy="0" rx="26" ry="16" fill="#8a5a2b" stroke="#321"/>
+  <circle cx="-24" cy="-8" r="10" fill="#8a5a2b" stroke="#321"/>
+  <polygon points="-34,-8 -44,-5 -34,-3" fill="#f90"/>
+  <circle cx="-26" cy="-10" r="2" fill="#000"/>
+  <polygon points="24,-2 52,6 24,8" fill="#6a4020" stroke="#321"/>
+  <line x1="-6" y1="14" x2="-6" y2="30" stroke="#321" stroke-width="2"/><line x1="6" y1="14" x2="6" y2="30" stroke="#321" stroke-width="2"/>
+</g>
+<rect x="985" y="328" width="80" height="6" rx="3" fill="#6a4a2a"/>
+<rect x="1010" y="334" width="6" height="76" fill="#6a4a2a"/>
+<text x="1020" y="282" font-size="13" text-anchor="middle" fill="#111">鳥（止まり木）</text>
+<path d="M640 300 Q760 150 975 280" fill="none" stroke="#c33" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#ar)"/>
+<text x="800" y="175" font-size="13" text-anchor="middle" fill="#c33">カメラで鳥を見つけて、向かう</text>
+
+<!-- RULES -->
+<text x="600" y="520" font-size="20" font-weight="bold" text-anchor="middle" fill="#123">動き方のルール（カメラに写る画面と、クローラーの動き）</text>
+<g font-size="13" text-anchor="middle" fill="#111">
+<!-- 1 center -->
+<rect x="30" y="540" width="270" height="230" rx="10" fill="#fff" stroke="#9ab" stroke-width="2"/>
+<rect x="60" y="560" width="210" height="120" fill="#eef5ff" stroke="#678"/>
+<line x1="130" y1="560" x2="130" y2="680" stroke="#9bd" stroke-dasharray="4 3"/><line x1="200" y1="560" x2="200" y2="680" stroke="#9bd" stroke-dasharray="4 3"/>
+<ellipse cx="165" cy="620" rx="22" ry="14" fill="#8a5a2b"/>
+<text x="165" y="705" font-weight="bold" font-size="16" fill="#064">鳥が中央</text>
+<text x="165" y="728" font-size="14">→ まっすぐ前進</text>
+<text x="165" y="752" font-size="12" fill="#666">（枠が大きくなったら止まる）</text>
+<!-- 2 right -->
+<rect x="320" y="540" width="270" height="230" rx="10" fill="#fff" stroke="#9ab" stroke-width="2"/>
+<rect x="350" y="560" width="210" height="120" fill="#eef5ff" stroke="#678"/>
+<line x1="420" y1="560" x2="420" y2="680" stroke="#9bd" stroke-dasharray="4 3"/><line x1="490" y1="560" x2="490" y2="680" stroke="#9bd" stroke-dasharray="4 3"/>
+<ellipse cx="525" cy="620" rx="22" ry="14" fill="#8a5a2b"/>
+<text x="455" y="705" font-weight="bold" font-size="16" fill="#064">鳥が右寄り</text>
+<text x="455" y="728" font-size="14">→ 右にその場で回って、中央へ</text>
+<text x="455" y="752" font-size="12" fill="#666">（左サーボ前、右サーボ後ろ）</text>
+<!-- 3 left -->
+<rect x="610" y="540" width="270" height="230" rx="10" fill="#fff" stroke="#9ab" stroke-width="2"/>
+<rect x="640" y="560" width="210" height="120" fill="#eef5ff" stroke="#678"/>
+<line x1="710" y1="560" x2="710" y2="680" stroke="#9bd" stroke-dasharray="4 3"/><line x1="780" y1="560" x2="780" y2="680" stroke="#9bd" stroke-dasharray="4 3"/>
+<ellipse cx="675" cy="620" rx="22" ry="14" fill="#8a5a2b"/>
+<text x="745" y="705" font-weight="bold" font-size="16" fill="#064">鳥が左寄り</text>
+<text x="745" y="728" font-size="14">→ 左にその場で回って、中央へ</text>
+<text x="745" y="752" font-size="12" fill="#666">（右サーボ前、左サーボ後ろ）</text>
+<!-- 4 scout -->
+<rect x="900" y="540" width="270" height="230" rx="10" fill="#fff" stroke="#9ab" stroke-width="2"/>
+<rect x="930" y="560" width="210" height="120" fill="#eef5ff" stroke="#678"/>
+<text x="1035" y="628" font-size="26" fill="#89a">？</text>
+<text x="1035" y="705" font-weight="bold" font-size="16" fill="#a60">鳥がいない（偵察）</text>
+<text x="1035" y="728" font-size="14">→ 3秒待ってから、回って探す</text>
+<text x="1035" y="752" font-size="12" fill="#666">（回る→止まって見る、を繰り返す）</text>
+</g>
+<text x="600" y="790" font-size="12" text-anchor="middle" fill="#567">走行は、基板の BOOT ボタン（鳥モードで1.5〜4秒長押し）で入り切り。電源を入れた直後は「切」</text>
+</svg>

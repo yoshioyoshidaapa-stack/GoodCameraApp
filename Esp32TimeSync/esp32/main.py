@@ -39,6 +39,11 @@ try:
 except ImportError:
     hl_status = None
 
+try:
+    import drive as drive_mod
+except ImportError:
+    drive_mod = None
+
 _IRQ_CENTRAL_CONNECT = 1
 _IRQ_CENTRAL_DISCONNECT = 2
 _IRQ_GATTS_WRITE = 3
@@ -298,7 +303,12 @@ def main():
         row("b_pos", pad(pos, 9), 78, lcd.WHITE, 1, 164, 76)
         row("b_photo", pad("PH:%s %d" % ("ON" if husky.auto_photo else "OFF", husky.photos), 9), 90, lcd.YELLOW, 1, 164, 76)
         row("b_seen", pad(husky.seen, 9), 102, lcd.GREEN, 1, 164, 76)
-        row("b_ble", pad("BLE ok" if clock.conn is not None else "BLE ..", 9), 114, lcd.GREEN, 1, 164, 76)
+        if drive is not None:  # 走行の状態: DR:OFF(動かない) / DR:ON FWD(前進) LFT(左) RGT(右) STP(停止)
+            short = {"forward": "FWD", "left": "LFT", "right": "RGT"}.get(drive.cmd, "STP")
+            row("b_ble", pad("DR:ON " + short if drive.enabled else "DR:OFF", 9), 114,
+                lcd.RED if drive.enabled else GRAY, 1, 164, 76)
+        else:
+            row("b_ble", pad("BLE ok" if clock.conn is not None else "BLE ..", 9), 114, lcd.GREEN, 1, 164, 76)
 
     def draw():
         """いまのモードの画面を描く。写真を撮る直前にも呼ばれる。"""
@@ -318,8 +328,25 @@ def main():
         lcd.rect(0, 0, 240, 135, lcd.BLACK)
         cache.clear()
 
+    drive = None
+    if drive_mod is not None:
+        try:
+            def _pwm(pin):
+                p = machine.PWM(machine.Pin(pin), freq=50)
+                p.duty_u16(0)
+                return p
+            drive = drive_mod.Drive(_pwm)
+        except Exception:
+            drive = None  # サーボが使えなくても、画面は動かす
+
+    def shoot_draw():
+        # 写真を撮っている間(最大数秒)は、結果が読めず、動きを直せない。先に止める。
+        if drive is not None:
+            drive.stop()
+        draw()
+
     if husky is not None:
-        husky.shoot_cb = draw
+        husky.shoot_cb = shoot_draw
     boot = machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_UP)  # BOOT ボタン
     boot_down_at = None  # BOOT ボタンを押し始めた時刻
 
@@ -334,11 +361,21 @@ def main():
                 held = time.ticks_diff(time.ticks_ms(), boot_down_at)
                 boot_down_at = None
                 if held >= 4000:
+                    if drive is not None:
+                        drive.stop()
                     switch_mode()
                 elif held >= 1500:
-                    husky.toggle_enroll()
+                    if drive is not None and state["mode"] == "bird":
+                        drive.toggle()  # 鳥モードでは、走行の入り切り(顔モードでは、自動登録の入り切り)
+                    else:
+                        husky.toggle_enroll()
                 elif held >= 30:
                     husky.toggle_photo()
+        if drive is not None:
+            if state["mode"] == "bird":
+                drive.command(drive_mod.plan(husky, drive.cmd))
+            else:
+                drive.stop()
         draw()
         time.sleep_ms(100)
 

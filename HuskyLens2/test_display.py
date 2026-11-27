@@ -178,6 +178,15 @@ def run_main(bus, loops, with_hl_status=True, synced=False, boot_pattern=None, f
             return 1
 
     mach.Pin = FakePin
+
+    class FakePWM:
+        def __init__(self, pin, freq=50):
+            self.freq = freq
+
+        def duty_u16(self, v=None):
+            pass
+
+    mach.PWM = FakePWM
     mach.I2C = lambda *a, **k: bus
 
     saved_mods = {k: sys.modules.get(k) for k in ("bluetooth", "machine", "lcd", "hl_status")}
@@ -1065,6 +1074,12 @@ def test_bird_screen_with_japanese_names():
     assert last_text_at(fake, 164, 102) == "bird,pers", "日本語の名前は、英語に直して出す"
 
 
+def test_bird_screen_shows_drive_off_at_start():
+    bus, fake = _bird_run(BIRDS)
+    check_layout(fake)
+    assert last_text_at(fake, 164, 114) == "DR:OFF", "電源を入れた直後は、走行は切"
+
+
 def test_no_micropython_incompatible_calls():
     """パソコンの Python にはあるが、MicroPython には無い書き方を、基板に入れるファイルで使っていないか。"""
     import re
@@ -1073,6 +1088,8 @@ def test_no_micropython_incompatible_calls():
         os.path.join(ESP32, "hl_status.py"),
         os.path.join(ESP32, "main.py"),
         os.path.join(ESP32, "lcd.py"),
+        os.path.join(ESP32, "drive.py"),
+        os.path.join(ESP32, "servo_test.py"),
     ]
     bad = [
         (r"\.pop\(", "bytearray/str には pop() が無い (list なら可)"),

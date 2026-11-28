@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" width="1200" height="900" font-family="Noto Sans CJK JP, WenQuanYi Zen Hei, Hiragino Sans, Yu Gothic, sans-serif"><rect width="1200" height="900" fill="#ffffff"/><path d="M230 190 L300 190 L300 130 L430 130" fill="none" stroke="#7a3fb0" stroke-width="4" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1060" width="1200" height="1060" font-family="Noto Sans CJK JP, WenQuanYi Zen Hei, Hiragino Sans, Yu Gothic, sans-serif"><rect width="1200" height="1060" fill="#ffffff"/><path d="M230 190 L300 190 L300 130 L430 130" fill="none" stroke="#7a3fb0" stroke-width="4" stroke-linejoin="round"/>
 <path d="M230 270 L270 270 L270 490 L130 490 L130 530" fill="none" stroke="#7a3fb0" stroke-width="4" stroke-linejoin="round"/>
 <path d="M230 350 L330 350 L330 615 L430 615" fill="none" stroke="#7a3fb0" stroke-width="4" stroke-linejoin="round"/>
 <path d="M430 170 L375 170 L375 590 L430 590" fill="none" stroke="#1aa83c" stroke-width="3" stroke-linejoin="round"/>
@@ -6,8 +6,21 @@
 <path d="M430 270 L405 270 L405 540 L430 540" fill="none" stroke="#222" stroke-width="3" stroke-linejoin="round"/>
 <path d="M650 170 L740 170 L740 150 L800 150" fill="none" stroke="#f08000" stroke-width="3" stroke-linejoin="round"/>
 <path d="M650 220 L720 220 L720 310 L800 310" fill="none" stroke="#f08000" stroke-width="3" stroke-linejoin="round"/>
-<path d="M650 270 L700 270 L700 500 L820 500" fill="none" stroke="#7a9a20" stroke-width="3" stroke-linejoin="round"/>
+<path d="M650 270 L700 270 L700 388" fill="none" stroke="#7a9a20" stroke-width="3" stroke-linejoin="round"/>
+<path d="M700 402 L700 500 L820 500" fill="none" stroke="#7a9a20" stroke-width="3" stroke-linejoin="round"/>
 <path d="M650 320 L670 320 L670 550 L820 550" fill="none" stroke="#7a9a20" stroke-width="3" stroke-linejoin="round"/>
+<path d="M650 395 L710 395" fill="none" stroke="#c60" stroke-width="3" stroke-linejoin="round"/>
+<line x1="710" y1="395" x2="710" y2="493" stroke="#c60" stroke-width="3"/>
+<line x1="710" y1="507" x2="710" y2="543" stroke="#c60" stroke-width="3"/>
+<line x1="710" y1="557" x2="710" y2="693" stroke="#c60" stroke-width="3"/>
+<line x1="710" y1="707" x2="710" y2="723" stroke="#c60" stroke-width="3"/>
+<line x1="710" y1="737" x2="710" y2="770" stroke="#c60" stroke-width="3"/>
+<path d="M650 420 L690 420" fill="none" stroke="#1a8a8a" stroke-width="3" stroke-linejoin="round"/>
+<line x1="690" y1="420" x2="690" y2="543" stroke="#1a8a8a" stroke-width="3"/>
+<line x1="690" y1="557" x2="690" y2="693" stroke="#1a8a8a" stroke-width="3"/>
+<line x1="690" y1="707" x2="690" y2="723" stroke="#1a8a8a" stroke-width="3"/>
+<line x1="690" y1="737" x2="690" y2="770" stroke="#1a8a8a" stroke-width="3"/>
+<path d="M760 730 L760 770" fill="none" stroke="#222" stroke-width="3" stroke-linejoin="round"/>
 <path d="M160 700 L1100 700" fill="none" stroke="#d11" stroke-width="4" stroke-linejoin="round"/>
 <path d="M100 730 L1130 730" fill="none" stroke="#222" stroke-width="4" stroke-linejoin="round"/>
 <path d="M160 640 L160 700" fill="none" stroke="#d11" stroke-width="4" stroke-linejoin="round"/>
@@ -47,6 +60,7 @@
 <circle cx="1130" cy="200" r="5" fill="#222"/>
 <circle cx="1130" cy="360" r="5" fill="#222"/>
 <circle cx="740" cy="550" r="5" fill="#7a9a20"/>
+<circle cx="760" cy="730" r="5" fill="#222"/>
 <rect x="30" y="110" width="200" height="330" rx="10" fill="#fff4d6" stroke="#a60" stroke-width="2"/>
 <text x="130" y="136" font-size="17" font-weight="bold" text-anchor="middle" fill="#520">モバイルバッテリー</text>
 <text x="130" y="154" font-size="12" text-anchor="middle" fill="#444">出力 1A 以上 × 3口</text>
@@ -76,6 +90,10 @@
 <text x="636" y="325" font-size="14" fill="#111" text-anchor="end" font-weight="bold">GPIO33</text>
 <circle cx="650" cy="370" r="7" fill="#222" stroke="#000"/>
 <text x="636" y="375" font-size="14" fill="#111" text-anchor="end" font-weight="bold">GND</text>
+<circle cx="650" cy="395" r="7" fill="#c60" stroke="#000"/>
+<text x="636" y="400" font-size="14" fill="#111" text-anchor="end" font-weight="bold">3V3</text>
+<circle cx="650" cy="420" r="7" fill="#1a8a8a" stroke="#000"/>
+<text x="636" y="425" font-size="14" fill="#111" text-anchor="end" font-weight="bold">GPIO13</text>
 <rect x="430" y="486" width="220" height="150" rx="10" fill="#eaf7ea" stroke="#363" stroke-width="2"/>
 <text x="540" y="512" font-size="17" font-weight="bold" text-anchor="middle" fill="#131">HuskyLens2 電源ボード</text>
 <text x="540" y="530" font-size="12" text-anchor="middle" fill="#444">PWR IN の USB-C に給電(口③)</text>
@@ -101,38 +119,48 @@
 <text x="812" y="335" font-size="13" fill="#d11" text-anchor="start">赤 (+) → +5V</text>
 <text x="812" y="355" font-size="13" fill="#111" text-anchor="start">茶 (−) → GND</text>
 <rect x="820" y="450" width="250" height="170" rx="10" fill="#fffbe0" stroke="#a80" stroke-width="2"/>
-<text x="945" y="476" font-size="17" font-weight="bold" text-anchor="middle" fill="#540">前方の距離センサー</text>
-<text x="945" y="588" font-size="12" fill="#540" text-anchor="middle">HC-SR04 など。車体の前に1個</text>
-<text x="832" y="505" font-size="13" fill="#111" text-anchor="start">TRIG ← GPIO27</text>
-<text x="832" y="555" font-size="13" fill="#111" text-anchor="start">ECHO → 分圧 → GPIO33</text>
+<text x="945" y="476" font-size="17" font-weight="bold" text-anchor="middle" fill="#540">前方の距離センサー US-015</text>
+<text x="945" y="588" font-size="12" fill="#540" text-anchor="middle">車体の前の真ん中に、前向きで1個</text>
+<text x="832" y="505" font-size="13" fill="#111" text-anchor="start">Trig ← GPIO27</text>
+<text x="832" y="555" font-size="13" fill="#111" text-anchor="start">Echo → 分圧 → GPIO33</text>
 <text x="940" y="612" font-size="12" fill="#d11" text-anchor="end">VCC</text>
 <text x="1030" y="612" font-size="12" fill="#111" text-anchor="end">GND</text>
+<rect x="620" y="770" width="260" height="120" rx="10" fill="#eefaf5" stroke="#3a8" stroke-width="2"/>
+<text x="750" y="796" font-size="17" font-weight="bold" text-anchor="middle" fill="#134">後ろの赤外線センサー KY-032</text>
+<circle cx="690" cy="770" r="7" fill="#1a8a8a" stroke="#000"/>
+<circle cx="710" cy="770" r="7" fill="#c60" stroke="#000"/>
+<circle cx="760" cy="770" r="7" fill="#222" stroke="#000"/>
+<text x="632" y="812" font-size="12" fill="#134" text-anchor="start">OUT ← GPIO13（物があると LOW）</text>
+<text x="632" y="830" font-size="12" fill="#a50" text-anchor="start">+ ← ESP32 の 3.3V</text>
+<text x="632" y="848" font-size="12" fill="#111" text-anchor="start">GND ← GND（黒）</text>
+<text x="632" y="866" font-size="12" fill="#134" text-anchor="start">EN: ジャンパー入れたまま / 後ろ向きに取付</text>
 <rect x="760" y="543" width="40" height="14" fill="#fff" stroke="#111" stroke-width="2"/>
 <text x="0" y="0" font-size="12" fill="#111" text-anchor="middle"></text>
 <text x="780" y="538" font-size="12" fill="#111" text-anchor="middle">1kΩ</text>
 <rect x="733" y="580" width="14" height="40" fill="#fff" stroke="#111" stroke-width="2"/>
 <text x="722" y="604" font-size="12" fill="#111" text-anchor="end">2kΩ</text>
 <text x="752" y="574" font-size="11" fill="#573" text-anchor="start">分圧点</text>
-<text x="880" y="752" font-size="12" fill="#a00" text-anchor="middle">↑ コンデンサ 470〜1000µF（+と−の向きに注意。+側を赤い線に）</text>
+<text x="900" y="752" font-size="12" fill="#a00" text-anchor="start">↑ コンデンサ 470〜1000µF</text>
+<text x="900" y="768" font-size="12" fill="#a00" text-anchor="start">（+と−の向きに注意。+側を赤い線に）</text>
 <text x="170" y="690" font-size="13" fill="#d11" text-anchor="start" font-weight="bold">+5V（赤）</text>
 <text x="110" y="755" font-size="13" fill="#111" text-anchor="start" font-weight="bold">GND（黒）</text>
 <text x="600" y="36" font-size="26" fill="#123" text-anchor="middle" font-weight="bold">クローラー 最新版 配線図</text>
 <text x="600" y="60" font-size="13" fill="#a00" text-anchor="middle">設計図です。実機では未確認。つなぐときは、必ずバッテリーを外した状態で。線の色は、図の中でだけ意味があります。</text>
-<text x="30" y="790" font-size="14" fill="#111" text-anchor="start" font-weight="bold">線の見方：</text>
-<path d="M120 785 L148 785" fill="none" stroke="#7a3fb0" stroke-width="5" stroke-linejoin="round"/>
-<text x="154" y="790" font-size="13" fill="#111" text-anchor="start">USBケーブル</text>
-<path d="M250 785 L278 785" fill="none" stroke="#d11" stroke-width="5" stroke-linejoin="round"/>
-<text x="284" y="790" font-size="13" fill="#111" text-anchor="start">+5V（赤）</text>
-<path d="M370 785 L398 785" fill="none" stroke="#222" stroke-width="5" stroke-linejoin="round"/>
-<text x="404" y="790" font-size="13" fill="#111" text-anchor="start">GND（黒）</text>
-<path d="M490 785 L518 785" fill="none" stroke="#f08000" stroke-width="5" stroke-linejoin="round"/>
-<text x="524" y="790" font-size="13" fill="#111" text-anchor="start">サーボの信号</text>
-<path d="M625 785 L653 785" fill="none" stroke="#7a9a20" stroke-width="5" stroke-linejoin="round"/>
-<text x="659" y="790" font-size="13" fill="#111" text-anchor="start">距離センサーの信号</text>
-<path d="M830 785 L858 785" fill="none" stroke="#1aa83c" stroke-width="5" stroke-linejoin="round"/>
-<text x="864" y="790" font-size="13" fill="#111" text-anchor="start">I2C SDA</text>
-<path d="M950 785 L978 785" fill="none" stroke="#1e5fe0" stroke-width="5" stroke-linejoin="round"/>
-<text x="984" y="790" font-size="13" fill="#111" text-anchor="start">I2C SCL</text>
-<text x="30" y="825" font-size="13" fill="#111" text-anchor="start">・線が交差していて、片方が途切れている所は「つながっていない」です。丸い点があるところだけが、つながっています。</text>
-<text x="30" y="848" font-size="13" fill="#a00" text-anchor="start">・ECHO は 5V を出します。ESP32 には 3.3V までなので、必ず 1kΩ と 2kΩ の抵抗で下げてから GPIO33 へ（3.3V 対応のセンサーなら不要）。</text>
-<text x="30" y="871" font-size="13" fill="#111" text-anchor="start">・サーボの電気（口②）と、基板・HuskyLens2 の電気（口①③）は、別の USB 口から取る。ESP32 の GND と端子台の GND は、必ずつなぐ。</text></svg>
+<text x="30" y="930" font-size="14" fill="#111" text-anchor="start" font-weight="bold">線の見方：</text>
+<path d="M120 925 L148 925" fill="none" stroke="#7a3fb0" stroke-width="5" stroke-linejoin="round"/>
+<text x="154" y="930" font-size="13" fill="#111" text-anchor="start">USBケーブル</text>
+<path d="M250 925 L278 925" fill="none" stroke="#d11" stroke-width="5" stroke-linejoin="round"/>
+<text x="284" y="930" font-size="13" fill="#111" text-anchor="start">+5V（赤）</text>
+<path d="M370 925 L398 925" fill="none" stroke="#222" stroke-width="5" stroke-linejoin="round"/>
+<text x="404" y="930" font-size="13" fill="#111" text-anchor="start">GND（黒）</text>
+<path d="M490 925 L518 925" fill="none" stroke="#f08000" stroke-width="5" stroke-linejoin="round"/>
+<text x="524" y="930" font-size="13" fill="#111" text-anchor="start">サーボの信号</text>
+<path d="M625 925 L653 925" fill="none" stroke="#7a9a20" stroke-width="5" stroke-linejoin="round"/>
+<text x="659" y="930" font-size="13" fill="#111" text-anchor="start">距離センサーの信号</text>
+<path d="M830 925 L858 925" fill="none" stroke="#1aa83c" stroke-width="5" stroke-linejoin="round"/>
+<text x="864" y="930" font-size="13" fill="#111" text-anchor="start">I2C SDA</text>
+<path d="M950 925 L978 925" fill="none" stroke="#1e5fe0" stroke-width="5" stroke-linejoin="round"/>
+<text x="984" y="930" font-size="13" fill="#111" text-anchor="start">I2C SCL</text>
+<text x="30" y="965" font-size="13" fill="#111" text-anchor="start">・線が交差していて、片方が途切れている所は「つながっていない」です。丸い点があるところだけが、つながっています。</text>
+<text x="30" y="988" font-size="13" fill="#a00" text-anchor="start">・US-015 は 5V で動かすと Echo も 5V。ESP32 は 3.3V までなので、必ず 1kΩ と 2kΩ の抵抗で下げてから GPIO33 へ。</text>
+<text x="30" y="1011" font-size="13" fill="#111" text-anchor="start">・サーボの電気（口②）と、基板・HuskyLens2 の電気（口①③）は、別の USB 口から取る。ESP32 の GND と端子台の GND は、必ずつなぐ。</text></svg>

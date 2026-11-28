@@ -1,4 +1,4 @@
-W,H=1200,900
+W,H=1200,1060
 o=[]
 def add(s): o.append(s)
 def line(pts,col,w=3,dash=None):
@@ -41,8 +41,13 @@ line([(430,270),(405,270),(405,540),(430,540)],BLK)
 line([(650,170),(740,170),(740,150),(800,150)],ORG)
 line([(650,220),(720,220),(720,310),(800,310)],ORG)
 # sonar signals
-line([(650,270),(700,270),(700,500),(820,500)],OLV)
+line([(650,270),(700,270),(700,388)],OLV); line([(700,402),(700,500),(820,500)],OLV)
 line([(650,320),(670,320),(670,550),(820,550)],OLV)
+# rear IR sensor wires: 3V3 (x=710) and GPIO13 (x=690) go down to the sensor box
+CY="#c60"; TEAL="#1a8a8a"
+line([(650,395),(710,395)],CY); vgap(710,395,770,CY,[500,550,700,730],3)
+line([(650,420),(690,420)],TEAL); vgap(690,420,770,TEAL,[550,700,730],3)
+line([(760,730),(760,770)],BLK)
 # rails
 line([(160,700),(1100,700)],RED,4)
 line([(100,730),(1130,730)],BLK,4)
@@ -64,7 +69,7 @@ line([(880,700),(880,710)],RED); line([(880,720),(880,730)],BLK)
 add('<line x1="862" y1="710" x2="898" y2="710" stroke="#111" stroke-width="4"/><line x1="862" y1="720" x2="898" y2="720" stroke="#111" stroke-width="4"/>')
 # junction dots
 for x,y,c in [(160,700,RED),(940,700,RED),(1100,700,RED),(1100,170,RED),(1100,330,RED),(880,700,RED),
-              (100,730,BLK),(660,730,BLK),(740,730,BLK),(1010,730,BLK),(1130,730,BLK),(880,730,BLK),(1130,200,BLK),(1130,360,BLK),(740,550,OLV)]:
+              (100,730,BLK),(660,730,BLK),(740,730,BLK),(1010,730,BLK),(1130,730,BLK),(880,730,BLK),(1130,200,BLK),(1130,360,BLK),(740,550,OLV),(760,730,BLK)]:
     dot(x,y,c)
 
 # boxes
@@ -75,7 +80,7 @@ box(430,110,220,330,"#eef3ff","#355","ESP32 基板","(ideaspark 液晶つき)")
 text(352,124,"USB-C ← 口①",11,USB)
 for y,col,lab in ((170,GRN,"D21 (SDA)"),(220,BLU,"D22 (SCL)"),(270,"#222","GND")):
     pin(430,y,col); text(444,y+5,lab,14,"#111",bold=True)
-for y,col,lab in ((170,ORG,"GPIO25"),(220,ORG,"GPIO26"),(270,OLV,"GPIO27"),(320,OLV,"GPIO33"),(370,"#222","GND")):
+for y,col,lab in ((170,ORG,"GPIO25"),(220,ORG,"GPIO26"),(270,OLV,"GPIO27"),(320,OLV,"GPIO33"),(370,"#222","GND"),(395,CY,"3V3"),(420,TEAL,"GPIO13")):
     pin(650,y,col); text(636,y+5,lab,14,"#111","end",True)
 box(430,486,220,150,"#eaf7ea","#363","HuskyLens2 電源ボード","PWR IN の USB-C に給電(口③)",  "#131")
 for y,lab in ((540,"黒 GND"),(565,"青 SCL"),(590,"緑 SDA")): text(440,y+4,lab,12); 
@@ -88,25 +93,29 @@ box(800,110,260,130,"#fff0f0","#a33","左サーボ (SG90-HV)",None,"#511")
 text(812,155,"橙 信号 ← GPIO25",13,"#a50"); text(812,175,"赤 (+) → +5V",13,RED); text(812,195,"茶 (−) → GND",13)
 box(800,270,260,130,"#fff0f0","#a33","右サーボ (SG90-HV)",None,"#511")
 text(812,315,"橙 信号 ← GPIO26",13,"#a50"); text(812,335,"赤 (+) → +5V",13,RED); text(812,355,"茶 (−) → GND",13)
-box(820,450,250,170,"#fffbe0","#a80","前方の距離センサー",None,"#540"); text(945,588,"HC-SR04 など。車体の前に1個",12,"#540","middle")
-text(832,505,"TRIG ← GPIO27",13); text(832,555,"ECHO → 分圧 → GPIO33",13)
+box(820,450,250,170,"#fffbe0","#a80","前方の距離センサー US-015",None,"#540"); text(945,588,"車体の前の真ん中に、前向きで1個",12,"#540","middle")
+text(832,505,"Trig ← GPIO27",13); text(832,555,"Echo → 分圧 → GPIO33",13)
 text(940,612,"VCC",12,RED,"end"); text(1030,612,"GND",12,"#111","end")
+# rear IR obstacle sensor box
+box(620,770,260,120,"#eefaf5","#3a8","後ろの赤外線センサー KY-032",None,"#134")
+for x,c in ((690,TEAL),(710,CY),(760,"#222")): pin(x,770,c)
+text(632,812,"OUT ← GPIO13（物があると LOW）",12,"#134"); text(632,830,"+ ← ESP32 の 3.3V",12,"#a50"); text(632,848,"GND ← GND（黒）",12,"#111"); text(632,866,"EN: ジャンパー入れたまま / 後ろ向きに取付",12,"#134")
 # divider labels
 res(760,543,40,14,"",0,0); text(780,538,"1kΩ",12,"#111","middle"); 
 add('<rect x="733" y="580" width="14" height="40" fill="#fff" stroke="#111" stroke-width="2"/>'); text(722,604,"2kΩ",12,"#111","end")
 text(752,574,"分圧点",11,"#573","start")
-text(880,752,"↑ コンデンサ 470〜1000µF（+と−の向きに注意。+側を赤い線に）",12,"#a00","middle")
+text(900,752,"↑ コンデンサ 470〜1000µF",12,"#a00","start"); text(900,768,"（+と−の向きに注意。+側を赤い線に）",12,"#a00","start")
 text(170,690,"+5V（赤）",13,RED,"start",True); text(110,755,"GND（黒）",13,"#111","start",True)
 # titles
 text(600,36,"クローラー 最新版 配線図",26,"#123","middle",True)
 text(600,60,"設計図です。実機では未確認。つなぐときは、必ずバッテリーを外した状態で。線の色は、図の中でだけ意味があります。",13,"#a00","middle")
 # legend
-text(30,790,"線の見方：",14,"#111",bold=True)
+text(30,930,"線の見方：",14,"#111",bold=True)
 for i,(c,lab) in enumerate(((USB,"USBケーブル"),(RED,"+5V（赤）"),(BLK,"GND（黒）"),(ORG,"サーボの信号"),(OLV,"距離センサーの信号"),(GRN,"I2C SDA"),(BLU,"I2C SCL"))):
     x=(120,250,370,490,625,830,950)[i]
-    line([(x,785),(x+28,785)],c,5); text(x+34,790,lab,13)
-text(30,825,"・線が交差していて、片方が途切れている所は「つながっていない」です。丸い点があるところだけが、つながっています。",13)
-text(30,848,"・ECHO は 5V を出します。ESP32 には 3.3V までなので、必ず 1kΩ と 2kΩ の抵抗で下げてから GPIO33 へ（3.3V 対応のセンサーなら不要）。",13,"#a00")
-text(30,871,"・サーボの電気（口②）と、基板・HuskyLens2 の電気（口①③）は、別の USB 口から取る。ESP32 の GND と端子台の GND は、必ずつなぐ。",13)
+    line([(x,925),(x+28,925)],c,5); text(x+34,930,lab,13)
+text(30,965,"・線が交差していて、片方が途切れている所は「つながっていない」です。丸い点があるところだけが、つながっています。",13)
+text(30,988,"・US-015 は 5V で動かすと Echo も 5V。ESP32 は 3.3V までなので、必ず 1kΩ と 2kΩ の抵抗で下げてから GPIO33 へ。",13,"#a00")
+text(30,1011,"・サーボの電気（口②）と、基板・HuskyLens2 の電気（口①③）は、別の USB 口から取る。ESP32 の GND と端子台の GND は、必ずつなぐ。",13)
 svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" font-family="Noto Sans CJK JP, WenQuanYi Zen Hei, Hiragino Sans, Yu Gothic, sans-serif"><rect width="%d" height="%d" fill="#ffffff"/>%s</svg>'%(W,H,W,H,W,H,"\n".join(o))
 open("/home/user/GoodCameraApp/HuskyLens2/docs/crawler_wiring_latest.svg","w",encoding="utf-8").write(svg)

@@ -20,6 +20,7 @@ STEPS_PER_TURN = 12  # 「回る→見る」を、この回数やったら(だ�
 FORWARD_MS = 2000  # 1周しても見つからないとき、前進する時間
 # 前方の壁よけ(超音波距離センサー HC-SR04 など)
 PIN_TRIG = 27  # センサーの TRIG をつなぐ GPIO 番号
+PIN_REAR = 13  # 後ろ向きにつける赤外線の障害物センサー(KY-032 など)の OUT をつなぐ GPIO 番号。物があると 0(LOW)になる
 PIN_ECHO = 33  # センサーの ECHO をつなぐ GPIO 番号(★5V の ECHO は、抵抗2本で 3.3V 以下に下げてから)
 STOP_CM = 25  # これより近いものが前にあれば、前進をやめる(センチ)
 CONFIRM_N = 2  # 近いという測定が、続けて何回出たら、本当に近いと判断するか(ノイズ対策)
@@ -187,9 +188,10 @@ class Planner:
     def _turn_cmd(self):
         return "right" if self.side > 0 else "left"
 
-    def update(self, husky, now, current, dist_cm=None):
+    def update(self, husky, now, current, dist_cm=None, rear=False):
         """いまの動き ('forward' / 'back' / 'left' / 'right' / 'stop') を返す。
-        dist_cm: 前方の距離センサーの値(センチ)。なし(None)なら、壁よけはしない。"""
+        dist_cm: 前方の距離センサーの値(センチ)。なし(None)なら、壁よけはしない。
+        rear: 後ろの赤外線センサーが、物を見つけたら True。下がっている最中なら、すぐ下がるのをやめる。"""
         self._update_blocked(dist_cm)
         if husky is None or not husky.is_ready():
             self.reset(now)  # つながっていない間は止まる。つながったら、待ってから探し始める
@@ -197,7 +199,7 @@ class Planner:
         if self.avoiding:  # 壁をよけている最中は、これを最後までやる: 下がる → 離れる向きに回る
             elapsed = ticks_diff(now, self.avoid_start)
             if self.avoid_phase == "back":
-                if elapsed < self.back_ms:
+                if elapsed < self.back_ms and not rear:
                     return "back"
                 self.avoid_phase = "turn"
                 self.avoid_start = now

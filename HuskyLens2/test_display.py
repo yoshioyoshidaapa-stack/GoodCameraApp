@@ -1087,14 +1087,14 @@ def test_bird_screen_shows_servo_and_sensor_state():
     check_layout(fake)
     assert last_text_at(fake, 164, 96) == "DR:OFF"
     assert last_text_at(fake, 164, 106) == "L:OFF" and last_text_at(fake, 164, 116) == "R:OFF", "走行が切のときは、両方 OFF"
-    assert last_text_at(fake, 164, 126) == "D:  ---", "返事がなければ、---(遠い)"
+    assert last_text_at(fake, 164, 126) == "D--- B:ok", "返事がなければ、---(遠い)"
     bus, fake = _bird_run(BIRDS, sonar_us=1160)  # 1160 マイクロ秒 = 20 cm
     check_layout(fake)
-    assert last_text_at(fake, 164, 126) == "D: 20cm", last_text_at(fake, 164, 126)
-    red = [t for t in fake.texts if t[1] == 164 and t[2] == 126 and t[0].startswith("D: 20")]
+    assert last_text_at(fake, 164, 126) == "D 20 B:ok", last_text_at(fake, 164, 126)
+    red = [t for t in fake.texts if t[1] == 164 and t[2] == 126 and t[0].startswith("D 20")]
     assert red and red[-1][3] == 0xF800, "近い(止まる距離より近い)ときは赤"
     bus, fake = _bird_run(BIRDS, sonar_us=11600)  # 200 cm
-    assert last_text_at(fake, 164, 126) == "D:200cm"
+    assert last_text_at(fake, 164, 126) == "D200 B:ok"
 
 
 def test_bird_screen_shows_servo_state_when_driving():

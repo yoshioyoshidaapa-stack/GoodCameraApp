@@ -232,6 +232,18 @@ def test_tracking_forward_stops_when_wall_ahead():
     assert pl.update(bird, 400, "stop", 100) == "forward", "壁が遠のけば、また前進"
 
 
+def test_rear_sensor_stops_backing_up():
+    pl = drive.Planner(lost_ms=1000, turn_ms=500, look_ms=500, steps=2, forward_ms=5000,
+                       stop_cm=25, confirm_n=2, back_ms=1000, avoid_turn_ms=1000)
+    pl.update(FakeHusky(x=100), 0, "stop")
+    none = FakeHusky(faces=0)
+    t, _ = _scout_to_forward(pl, none)
+    pl.update(none, t + 100, "forward", 20)
+    assert pl.update(none, t + 200, "forward", 20) == "back"
+    assert pl.update(none, t + 400, "back", 20, rear=False) == "back", "後ろが空いていれば、下がり続ける"
+    assert pl.update(none, t + 500, "back", 20, rear=True) == "right", "後ろに物があれば、すぐ下がるのをやめて、回る(向きは、毎回入れ替わる)"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

@@ -321,13 +321,14 @@ def main():
                 row(ykey, pad(name + ":" + txt, 9), yy, col, 1, 164, 76)
             # 前方の距離センサー(センチ)。近い(止まる距離より近い)と赤
             dist = state.get("dist")
+            rear = state.get("rear", False)
             if sonar is None:
                 dtxt, dcol = "D:NO SNS", GRAY
-            elif dist is None:
-                dtxt, dcol = "D:  ---", lcd.GREEN
             else:
-                dtxt = "D:%3dcm" % int(dist)
-                dcol = lcd.RED if dist < drive_mod.STOP_CM else lcd.GREEN
+                # 例: "D200 B:ok" = 前 200cm、後ろ(B)は物なし / "D 20 B:!!" = 前 20cm、後ろに物あり
+                dtxt = "D" + ("---" if dist is None else "%3d" % int(dist)) + " B:" + ("!!" if rear else "ok")
+                near = dist is not None and dist < drive_mod.STOP_CM
+                dcol = lcd.RED if (near or rear) else lcd.GREEN
             row("b_d", pad(dtxt, 9), 126, dcol, 1, 164, 76)
         else:
             row("b_ble", pad("BLE ok" if clock.conn is not None else "BLE ..", 9), 114, lcd.GREEN, 1, 164, 76)
@@ -372,6 +373,13 @@ def main():
         except Exception:
             sonar = None
 
+    rear_pin = None  # 後ろの赤外線センサー(なくても動く。つながっていなければ、物なしと読む)
+    if drive is not None:
+        try:
+            rear_pin = machine.Pin(drive_mod.PIN_REAR, machine.Pin.IN, machine.Pin.PULL_UP)
+        except Exception:
+            rear_pin = None
+
     def shoot_draw():
         # 写真を撮っている間(最大数秒)は、結果が読めず、動きを直せない。先に止める。
         if drive is not None:
@@ -409,7 +417,9 @@ def main():
             if state["mode"] == "bird":
                 dist = sonar.measure() if sonar is not None else None  # 走行が切でも測る(画面で、センサーの値を見られるように)
                 state["dist"] = dist
-                drive.command(planner.update(husky, time.ticks_ms(), drive.cmd, dist))
+                rear = rear_pin is not None and rear_pin.value() == 0  # 0 = 後ろに物がある
+                state["rear"] = rear
+                drive.command(planner.update(husky, time.ticks_ms(), drive.cmd, dist, rear))
             else:
                 drive.stop()
                 planner.reset(time.ticks_ms())
